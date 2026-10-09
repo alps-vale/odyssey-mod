@@ -154,6 +154,15 @@ class UpdateApplierTest {
         assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
     }
 
+    @Test void enablingAutomaticUpdatesOnHealthyInstallPreservesFutureRollbackDetection() throws Exception {
+        UpdateApplier.apply(target, key.getPublic());
+        UpdateApplier.acknowledgeRollback(target);
+        assertTrue(Files.exists(directory.resolve("installed.sha256")));
+        Files.copy(directory.resolve("previous.jar"), target, StandardCopyOption.REPLACE_EXISTING);
+        assertTrue(UpdateApplier.wasRolledBack(target));
+        assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
+    }
+
     @Test void standaloneHelpersWaitForActualParentExitAndHandleDuplicateLaunches() throws Exception {
         Process parent = startParent();
         Process first = null, second = null;

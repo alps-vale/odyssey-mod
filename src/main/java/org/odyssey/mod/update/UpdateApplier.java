@@ -162,9 +162,9 @@ public final class UpdateApplier {
     }
 
     /** An explicit opt-in acknowledges the restored version without deleting the backup. */
-    public static void acknowledgeRollback(Path target) throws IOException {
-        validatePaths(target, directory(target));
-        Files.deleteIfExists(directory(target).resolve("installed.sha256"));
+    public static void acknowledgeRollback(Path target) throws IOException, java.security.GeneralSecurityException {
+        // Enabling automatic updates on a healthy installation must retain future rollback detection.
+        if (wasRolledBack(target)) Files.deleteIfExists(directory(target).resolve("installed.sha256"));
     }
 
     public static void atomicWrite(Path path, byte[] bytes) throws IOException {
