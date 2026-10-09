@@ -1,0 +1,159 @@
+name: Odyssey CI and release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v7.0.1; action.yml runs on node24.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Restore shared tools on all events; PRs never write the cache.
+      # actions/cache/restore v6.1.0; action.yml runs on node24.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: runner.os == 'Linux'
+        with:
+          path: ~/.local/share/mise/installs
+          key: mise-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.lock') }}
+
+      # jdx/mise-action v5.1.1; action.yml runs on node24.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.10.3
+          install_args: --locked
+          cache: false
+          github_token: ""
+
+      - name: Verify tag provenance and select mod version
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: release
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          git merge-base --is-ancestor "$SHA" origin/main
+          version="$(mise run --quiet release-version --tag "$TAG")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build, test, and lint
+        env:
+          ODYSSEY_VERSION: ${{ steps.release.outputs.version }}
+        run: mise run ci
+
+      - name: Validate and record the remapped artifact
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version "$RELEASE_VERSION" --metadata build/libs/release-artifact.json --source-sha "$SHA"
+          else
+            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.1.0-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
+          fi
+
+      # actions/upload-artifact v7.0.2; action.yml runs on node24.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: runner.os == 'Linux'
+        with:
+          name: odyssey-remapped-jar
+          path: |
+            build/libs/odyssey-mod.jar
+            build/libs/release-artifact.json
+          if-no-files-found: error
+          retention-days: 14
+
+      # actions/cache/save v6.1.0; action.yml runs on node24. Trusted writes only.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: runner.os == 'Linux' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        with:
+          path: ~/.local/share/mise/installs
+          key: mise-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.lock') }}
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: odyssey-release-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      # actions/checkout v7.0.1; action.yml runs on node24.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # jdx/mise-action v5.1.1; action.yml runs on node24.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.10.3
+          install_args: --locked
+          cache: false
+          github_token: ""
+
+      # actions/download-artifact v8.0.1; action.yml runs on node24.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: odyssey-remapped-jar
+          path: release-artifact
+
+      - name: Verify promoted artifact
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          version="$(mise run --quiet release-version --tag "$TAG")"
+          mise run --quiet verify-release-artifact --jar release-artifact/odyssey-mod.jar --metadata release-artifact/release-artifact.json --version "$version" --source-sha "$SHA"
+
+      - name: Create release and upload the same runnable JAR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if gh release view "$TAG" --json assets --jq '.assets[] | select(.name == "odyssey-mod.jar") | .name' | grep -qx 'odyssey-mod.jar'; then
+              mkdir -p existing-release-asset
+              gh release download "$TAG" --pattern odyssey-mod.jar --dir existing-release-asset
+              cmp --silent release-artifact/odyssey-mod.jar existing-release-asset/odyssey-mod.jar
+            else
+              gh release upload "$TAG" release-artifact/odyssey-mod.jar
+            fi
+          elif [[ "$TAG" == v0.1.0 ]]; then
+            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-file CHANGELOG.md
+          elif [[ "$TAG" == *-* ]]; then
+            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --title "Odyssey $TAG" --generate-notes --prerelease --latest=false
+          else
+            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --generate-notes
+          fi
+
+      - name: Announce release to Discord and verify readback
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: mise run --quiet release-announce --tag "$TAG" --repository "$REPOSITORY" --source-sha "$SOURCE_SHA" --jar release-artifact/odyssey-mod.jar

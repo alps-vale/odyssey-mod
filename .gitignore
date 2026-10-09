@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+.mise-data/
+__pycache__/
+*.py[cod]
+build/
+run/
+.idea/
+*.iml
+logs/
+*.log
+.env
+.env.*
+!*.example
+discord-release-receipt.json

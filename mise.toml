@@ -1,0 +1,64 @@
+min_version = "2026.10.3"
+[settings]
+lockfile = true
+
+[tools]
+java = "temurin-25.0.4+101.0.LTS"
+python = "3.13.16"
+actionlint = "1.7.12"
+zizmor = "1.30.1"
+
+[env]
+ODYSSEY_BACKEND_URL = "https://odyssey.notes.supply"
+
+[tasks.default]
+description = "Run the complete local CI check without touching a game instance"
+run = "mise run ci"
+
+[tasks.workflow-lint]
+description = "Lint GitHub Actions workflow security and syntax"
+run = "python ci/workflow_lint.py"
+
+[tasks.test]
+description = "Run Odyssey unit tests against the production backend URL"
+run = "python ci/gradle.py test"
+
+[tasks.test-release]
+description = "Test the version/artifact/Discord release helpers without sending a message"
+run = "python ci/test_release.py"
+
+[tasks.build]
+description = "Build and remap Odyssey without installing it into PrismLauncher"
+run = "python ci/gradle.py build"
+
+[tasks.ci]
+description = "Run workflow lint and the complete Gradle build/test graph"
+depends = ["workflow-lint", "test-release", "build"]
+
+[tasks.release-version]
+description = "Validate a release tag and print its SemVer value"
+run = "python ci/release.py version"
+
+[tasks.release-artifact]
+description = "Validate the remapped build JAR and write its provenance record"
+run = "python ci/release.py artifact"
+
+[tasks.verify-release-artifact]
+description = "Verify a promoted JAR against its build provenance record"
+run = "python ci/release.py verify-artifact"
+
+[tasks.release-announce]
+description = "Announce a GitHub release to Discord and verify the message and attachments"
+run = "python ci/release.py announce"
+
+[tasks.install]
+description = "Install the production build into the configured PrismLauncher instance"
+run = "python ci/local.py install"
+
+[tasks.menu]
+description = "Install Odyssey and open the configured PrismLauncher instance"
+run = "python ci/local.py menu"
+
+[tasks.launch]
+description = "Install Odyssey and connect the configured instance to Wynncraft"
+run = "python ci/local.py launch"

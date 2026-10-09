@@ -1,0 +1,38 @@
+{
+  "providers": [
+    {
+      "type": "bitmap",
+      "file": "odyssey:font/discord_mark.png",
+      "ascent": 8,
+      "height": 9,
+      "chars": [
+        "\uF8F2"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "odyssey:font/system_mark.png",
+      "ascent": 8,
+      "height": 9,
+      "chars": [
+        "\uF8F4"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "odyssey:font/wynn_rail.png",
+      "ascent": 8,
+      "height": 9,
+      "chars": [
+        "\uF8F3"
+      ]
+    },
+    {
+      "type": "space",
+      "advances": {
+        "\uF8FD": 1,
+        "\uF8FE": -1
+      }
+    }
+  ]
+}

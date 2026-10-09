@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "org.odyssey.mod.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "ChatComponentMixin",
+    "ClientPacketListenerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
