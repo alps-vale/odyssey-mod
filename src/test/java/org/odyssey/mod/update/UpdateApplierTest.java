@@ -1,5 +1,6 @@
 package org.odyssey.mod.update;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -7,9 +8,15 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.net.*;
+import java.net.http.HttpClient;
 import java.security.*;
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.jar.*;
 import java.util.zip.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -161,6 +168,75 @@ class UpdateApplierTest {
         Files.copy(directory.resolve("previous.jar"), target, StandardCopyOption.REPLACE_EXISTING);
         assertTrue(UpdateApplier.wasRolledBack(target));
         assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
+    }
+
+    @Test void completedTransactionSurvivesReceiptWriteFailureAndFinishesOnRetry() throws Exception {
+        String expected = UpdateManifest.verify(manifest, signature, key.getPublic()).sha256();
+        Files.copy(target, directory.resolve("previous.jar"));
+        Files.move(directory.resolve("pending.jar"), target, StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING);
+        // A real filesystem write failure, portable across the native CI runners.
+        Files.createDirectory(directory.resolve("installed.sha256"));
+        assertThrows(IOException.class, () -> UpdateApplier.reconcile(target, key.getPublic()));
+        assertTrue(Files.exists(directory.resolve("pending.properties")));
+        assertEquals(expected, UpdateManifest.digest(target));
+        assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
+        Files.delete(directory.resolve("installed.sha256"));
+        assertEquals(UpdateApplier.PendingState.COMPLETED, UpdateApplier.reconcile(target, key.getPublic()));
+        assertEquals(expected, Files.readString(directory.resolve("installed.sha256")));
+        assertFalse(Files.exists(directory.resolve("pending.properties")));
+    }
+
+    @Test void optOutDuringDownloadCancelsAutomaticTransactionBeforeCommit() throws Exception {
+        optOutDuringDownload(true);
+    }
+
+    @Test void optOutDuringDownloadDoesNotCancelExplicitInstallation() throws Exception {
+        optOutDuringDownload(false);
+    }
+
+    private void optOutDuringDownload(boolean automaticInstall) throws Exception {
+        byte[] jar = Files.readAllBytes(directory.resolve("pending.jar"));
+        Files.delete(directory.resolve("pending.jar"));
+        Files.delete(directory.resolve("pending.properties"));
+        var began = new CountDownLatch(1);
+        var resume = new CountDownLatch(1);
+        var automatic = new AtomicBoolean(true);
+        var executor = Executors.newSingleThreadExecutor();
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/jar", exchange -> {
+            exchange.sendResponseHeaders(200, jar.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(jar, 0, 1); output.flush(); began.countDown();
+                if (resume.await(10, TimeUnit.SECONDS)) output.write(jar, 1, jar.length - 1);
+            } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        });
+        server.start();
+        try {
+            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/jar");
+            var signed = UpdateManifest.verify(manifest, signature, key.getPublic());
+            // The local HTTP fixture replaces only the download endpoint, not the signed transaction data.
+            var local = new UpdateManifest(signed.version(), uri, signed.size(), signed.sha256(),
+                    signed.metadataSha256(), signed.requirements());
+            var transport = new UpdateTransport(HttpClient.newHttpClient(), candidate -> candidate.equals(uri),
+                    Duration.ofSeconds(10));
+            var result = executor.submit(() -> UpdateStager.stage(target, local, manifest, signature,
+                    transport, staged -> assertTrue(Files.isRegularFile(staged)),
+                    () -> !automaticInstall || automatic.get()));
+            assertTrue(began.await(10, TimeUnit.SECONDS));
+            automatic.set(false);
+            resume.countDown();
+            assertEquals(!automaticInstall, result.get(10, TimeUnit.SECONDS));
+            assertArrayEquals(previous, Files.readAllBytes(target));
+            assertEquals(!automaticInstall, Files.exists(directory.resolve("pending.properties")));
+            if (!automaticInstall) {
+                UpdateApplier.apply(target, key.getPublic());
+                assertEquals(signed.sha256(), UpdateManifest.digest(target));
+                assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
+            }
+        } finally {
+            resume.countDown(); server.stop(0); executor.shutdownNow();
+        }
     }
 
     @Test void standaloneHelpersWaitForActualParentExitAndHandleDuplicateLaunches() throws Exception {

@@ -4,16 +4,11 @@ import net.fabricmc.loader.api.FabricLoader
 import net.fabricmc.loader.api.metadata.ModOrigin
 import org.odyssey.mod.OdysseyDiagnostics
 import org.odyssey.mod.config.OdysseyConfig
-import java.io.ByteArrayOutputStream
 import java.net.URI
-import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 import java.time.Duration
 import java.time.Instant
-import java.util.Properties
-import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -143,31 +138,18 @@ internal class OdysseyUpdater(
         candidate = Candidate(manifest, bytes, signature)
         status = "Odyssey ${manifest.version()} is available."
         if (target == null) notify(UpdateNotice(status, UpdateNotice.Action.RELEASES))
-        else if (automatic && !rollbackPaused && installAutomatic) stage(target, candidate!!)
+        else if (automatic && !rollbackPaused && installAutomatic) stage(target, candidate!!, automaticInstall = true)
         else notify(UpdateNotice(status, UpdateNotice.Action.INSTALL))
     }
 
-    private fun stage(jar: Path, release: Candidate) {
-        val directory = UpdateApplier.directory(jar)
-        UpdateApplier.validatePaths(jar, directory)
-        FileChannel.open(directory.resolve("lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
-            channel.tryLock().use { lock ->
-                check(lock != null) { "Another update is being prepared." }
-                check(!Files.exists(directory.resolve("pending.properties"))) { "An update is already pending." }
-                val staged = directory.resolve("pending.jar")
-                transport.download(release.manifest.jarUrl(), staged, release.manifest.size())
-                release.manifest.verifyJar(staged)
-                UpdateCompatibility.verifyMetadata(staged, release.manifest)
-                UpdateApplier.atomicWrite(directory.resolve("update.manifest"), release.bytes)
-                UpdateApplier.atomicWrite(directory.resolve("update.manifest.sig"), release.signature)
-                val properties = Properties().apply {
-                    setProperty("target", jar.toString())
-                    setProperty("previousSha256", UpdateManifest.digest(jar))
-                    setProperty("transactionId", UUID.randomUUID().toString())
-                }
-                val journal = ByteArrayOutputStream().apply { properties.store(this, "Odyssey pending update") }
-                UpdateApplier.atomicWrite(directory.resolve("pending.properties"), journal.toByteArray())
-            }
+    private fun stage(jar: Path, release: Candidate, automaticInstall: Boolean = false) {
+        val committed = UpdateStager.stage(jar, release.manifest, release.bytes, release.signature, transport,
+            { UpdateCompatibility.verifyMetadata(it, release.manifest) },
+            { !automaticInstall || automatic })
+        if (!committed) {
+            status = "Automatic update cancelled."
+            notify(UpdateNotice(status))
+            return
         }
         launchHelper(jar)
         stagedNotice(release.manifest.version())

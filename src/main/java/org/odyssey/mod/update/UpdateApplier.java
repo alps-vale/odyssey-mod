@@ -102,24 +102,30 @@ public final class UpdateApplier {
                 StandardOpenOption.WRITE); var lock = channel.tryLock()) {
             if (lock == null) throw new IOException("Another updater owns this transaction");
             if (!Files.exists(pending)) return PendingState.NONE;
+            UpdateManifest manifest;
+            boolean completed;
             try {
                 var journal = load(pending);
                 if (!target.toString().equals(journal.getProperty("target"))) throw new IOException("Target changed");
-                var manifest = UpdateManifest.verify(UpdateManifest.readLimited(directory.resolve("update.manifest"),
+                manifest = UpdateManifest.verify(UpdateManifest.readLimited(directory.resolve("update.manifest"),
                                 UpdateManifest.MAX_MANIFEST),
                         UpdateManifest.readLimited(directory.resolve("update.manifest.sig"), 64), key);
                 String current = UpdateManifest.digest(target);
-                if (current.equals(manifest.sha256())) {
-                    finish(directory, manifest);
-                    return PendingState.COMPLETED;
+                completed = current.equals(manifest.sha256());
+                if (!completed) {
+                    if (!current.equals(journal.getProperty("previousSha256"))) throw new IOException("Manual installation");
+                    manifest.verifyJar(directory.resolve("pending.jar"));
                 }
-                if (!current.equals(journal.getProperty("previousSha256"))) throw new IOException("Manual installation");
-                manifest.verifyJar(directory.resolve("pending.jar"));
-                return PendingState.PENDING;
             } catch (IOException | java.security.GeneralSecurityException invalid) {
                 Files.delete(pending);
                 return PendingState.DISCARDED;
             }
+            // A valid completed transaction must survive transient receipt-write failures.
+            if (completed) {
+                finish(directory, manifest);
+                return PendingState.COMPLETED;
+            }
+            return PendingState.PENDING;
         }
     }
 
