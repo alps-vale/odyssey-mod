@@ -131,6 +131,29 @@ class UpdateApplierTest {
         UpdateApplier.apply(target, key.getPublic(), journal.getProperty("transactionId"));
     }
 
+    @Test void malformedPropertyEscapesAreDiscardedWithoutTouchingInstalledJarOrBackup() throws Exception {
+        Files.writeString(directory.resolve("pending.properties"), "target=\\u12\n");
+        Files.write(directory.resolve("previous.jar"), previous);
+        assertThrows(IOException.class, () -> UpdateApplier.load(directory.resolve("pending.properties")));
+        assertEquals(UpdateApplier.PendingState.DISCARDED, UpdateApplier.reconcile(target, key.getPublic()));
+        assertEquals(UpdateApplier.PendingState.NONE, UpdateApplier.reconcile(target, key.getPublic()));
+        assertArrayEquals(previous, Files.readAllBytes(target));
+        assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
+    }
+
+    @Test void manualRollbackRemainsDetectableAfterNoticeUntilExplicitlyAcknowledged() throws Exception {
+        UpdateApplier.apply(target, key.getPublic());
+        assertFalse(UpdateApplier.wasRolledBack(target));
+        Files.delete(directory.resolve("installed.txt")); // The client already showed the installation notice.
+        Files.copy(directory.resolve("previous.jar"), target, StandardCopyOption.REPLACE_EXISTING);
+        assertTrue(UpdateApplier.wasRolledBack(target));
+        assertTrue(UpdateApplier.wasRolledBack(target)); // A subsequent startup must still pause automatic updates.
+        UpdateApplier.acknowledgeRollback(target);
+        assertFalse(UpdateApplier.wasRolledBack(target));
+        assertArrayEquals(previous, Files.readAllBytes(target));
+        assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
+    }
+
     @Test void standaloneHelpersWaitForActualParentExitAndHandleDuplicateLaunches() throws Exception {
         Process parent = startParent();
         Process first = null, second = null;

@@ -47,6 +47,7 @@ replaces the installed Odyssey JAR, and keeps the previous copy in
 If an update fails, the installed JAR stays in place. Try
 `/odyssey update install` again, or close Minecraft and replace the JAR manually.
 To roll back, close Minecraft and copy `previous.jar` over your Odyssey JAR.
+Automatic updates pause after a rollback; `/odyssey update auto on` resumes them.
 Keep only one Odyssey JAR in `mods`. The updater cannot fix a Minecraft startup
 crash before Odyssey loads.
 
@@ -63,8 +64,10 @@ mise run ci
 
 `mise run build` creates `build/libs/odyssey-mod.jar`.
 CI checks the build and installer on Linux, Windows, and macOS (Apple Silicon
-and Intel). These commands do not install or
-launch Minecraft.
+and Intel). It caches tools and Gradle state per platform, cancels superseded
+checks, and runs workflow/release-helper checks once on Linux. Only `main`
+updates shared caches; PRs and releases read them. These commands do not install
+or launch Minecraft.
 
 ## Releases
 

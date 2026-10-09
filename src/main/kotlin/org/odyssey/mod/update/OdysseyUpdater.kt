@@ -15,7 +15,7 @@ import java.time.Instant
 import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 internal data class UpdateNotice(val text: String, val action: Action? = null, val warning: Boolean = false) {
     enum class Action { INSTALL, RELEASES }
@@ -34,13 +34,18 @@ internal class OdysseyUpdater(
     private val worker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "Odyssey updates").apply { isDaemon = true }
     }
-    private val busy = AtomicBoolean()
+    private val queued = AtomicInteger()
     private var candidate: Candidate? = null
+    private var rollbackPaused = false
     @Volatile private var automatic = config.autoUpdate
     @Volatile var status = "Updates have not been checked yet."
         private set
 
     fun start() = submit(false) {
+        rollbackPaused = target?.let(UpdateApplier::wasRolledBack) ?: false
+        if (rollbackPaused && automatic)
+            notify(UpdateNotice("Automatic updates paused after a rollback. Use /odyssey update auto on to resume.",
+                warning = true))
         if (pendingState() == UpdateApplier.PendingState.PENDING) {
             // Don't endlessly retry a failed transaction. A user can request another attempt.
             status = "The last update was not installed. Use /odyssey update install to retry."
@@ -71,20 +76,27 @@ internal class OdysseyUpdater(
             launchHelper(jar)
             stagedNotice(manifest.version())
         } else {
-            if (candidate == null) checkRelease(false, installAutomatic = false)
+            if (candidate == null) checkRelease(true, installAutomatic = false)
             candidate?.let { stage(jar, it) }
                 ?: notify(UpdateNotice("No compatible update is available."))
         }
     }
 
     fun setAutomatic(enabled: Boolean) {
-        // Only called on the game thread. Preserve the other Odyssey preferences.
-        config = config.copy(autoUpdate = enabled)
-        OdysseyConfig.save(config)
+        // Honour an opt-out immediately, including while a release check is fetching metadata.
         automatic = enabled
-        notify(UpdateNotice(if (enabled) "Automatic updates enabled. Updates install when Minecraft closes."
-            else "Automatic updates disabled."))
-        if (enabled) check()
+        submit(true, queue = true) {
+            // Persist settings/rollback acknowledgement in order; never drop an opt-out as busy.
+            if (enabled) {
+                target?.let(UpdateApplier::acknowledgeRollback)
+                rollbackPaused = false
+            }
+            config = config.copy(autoUpdate = enabled)
+            OdysseyConfig.save(config)
+            notify(UpdateNotice(if (enabled) "Automatic updates enabled. Updates install when Minecraft closes."
+                else "Automatic updates disabled."))
+            if (enabled && automatic) checkRelease(true)
+        }
     }
 
     private fun checkRelease(manual: Boolean, installAutomatic: Boolean = true) {
@@ -131,7 +143,7 @@ internal class OdysseyUpdater(
         candidate = Candidate(manifest, bytes, signature)
         status = "Odyssey ${manifest.version()} is available."
         if (target == null) notify(UpdateNotice(status, UpdateNotice.Action.RELEASES))
-        else if (automatic && installAutomatic) stage(target, candidate!!)
+        else if (automatic && !rollbackPaused && installAutomatic) stage(target, candidate!!)
         else notify(UpdateNotice(status, UpdateNotice.Action.INSTALL))
     }
 
@@ -204,8 +216,9 @@ internal class OdysseyUpdater(
         it.metadata.id to it.metadata.version.friendlyString
     } + ("java" to Runtime.version().feature().toString())
 
-    private fun submit(manual: Boolean, task: () -> Unit) {
-        if (!busy.compareAndSet(false, true)) {
+    private fun submit(manual: Boolean, queue: Boolean = false, task: () -> Unit) {
+        if (queue) queued.incrementAndGet()
+        else if (!queued.compareAndSet(0, 1)) {
             if (manual) notify(UpdateNotice("An update check is already running."))
             return
         }
@@ -215,7 +228,7 @@ internal class OdysseyUpdater(
                 OdysseyDiagnostics.logger.warn("[Odyssey Mod] Update operation failed", error)
                 status = "Couldn't update Odyssey. Your installed JAR is unchanged; try again or update manually."
                 if (manual) notify(UpdateNotice(status, UpdateNotice.Action.RELEASES, true))
-            } finally { busy.set(false) }
+            } finally { queued.decrementAndGet() }
         }
     }
 

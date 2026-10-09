@@ -56,7 +56,7 @@ public final class UpdateApplier {
             String current = UpdateManifest.digest(target);
             // A crash after the atomic move but before the receipt is recoverable without replacing again.
             if (current.equals(manifest.sha256())) {
-                finish(directory, manifest.version());
+                finish(directory, manifest);
                 return;
             }
             if (!current.equals(journal.getProperty("previousSha256")))
@@ -73,7 +73,7 @@ public final class UpdateApplier {
                     // Do not implement a delete-first or non-atomic fallback.
                     Files.move(staged, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
                     force(target);
-                    finish(directory, manifest.version());
+                    finish(directory, manifest);
                     return;
                 } catch (AtomicMoveNotSupportedException unsupported) {
                     throw unsupported;
@@ -110,7 +110,7 @@ public final class UpdateApplier {
                         UpdateManifest.readLimited(directory.resolve("update.manifest.sig"), 64), key);
                 String current = UpdateManifest.digest(target);
                 if (current.equals(manifest.sha256())) {
-                    finish(directory, manifest.version());
+                    finish(directory, manifest);
                     return PendingState.COMPLETED;
                 }
                 if (!current.equals(journal.getProperty("previousSha256"))) throw new IOException("Manual installation");
@@ -131,7 +131,7 @@ public final class UpdateApplier {
         if (!Files.getFileStore(target).equals(Files.getFileStore(directory)))
             throw new IOException("Update staging must use the same filesystem");
         for (String name : new String[]{"lock", "pending.jar", "previous.jar", "pending.properties",
-                "update.manifest", "update.manifest.sig", "installed.txt", "helper.jar", "helper.log"}) {
+                "update.manifest", "update.manifest.sig", "installed.txt", "installed.sha256", "helper.jar", "helper.log"}) {
             if (Files.isSymbolicLink(directory.resolve(name))) throw new IOException("Unsafe update path");
         }
     }
@@ -139,8 +139,32 @@ public final class UpdateApplier {
     public static Properties load(Path path) throws IOException {
         if (Files.size(path) > UpdateManifest.MAX_MANIFEST) throw new IOException("Oversized update journal");
         var result = new Properties();
-        try (var input = Files.newInputStream(path)) { result.load(input); }
+        try (var input = Files.newInputStream(path)) {
+            result.load(input);
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Malformed update journal", malformed);
+        }
         return result;
+    }
+
+    /** Keep rollback detection after the one-time installation notice has been consumed. */
+    public static boolean wasRolledBack(Path target) throws IOException, java.security.GeneralSecurityException {
+        Path directory = directory(target);
+        Path receipt = directory.resolve("installed.sha256");
+        if (!Files.exists(receipt)) return false;
+        validatePaths(target, directory);
+        String installed = new String(UpdateManifest.readLimited(receipt, 64),
+                java.nio.charset.StandardCharsets.UTF_8);
+        String current = UpdateManifest.digest(target);
+        Path backup = directory.resolve("previous.jar");
+        return !installed.equals(current) && Files.isRegularFile(backup)
+                && UpdateManifest.digest(backup).equals(current);
+    }
+
+    /** An explicit opt-in acknowledges the restored version without deleting the backup. */
+    public static void acknowledgeRollback(Path target) throws IOException {
+        validatePaths(target, directory(target));
+        Files.deleteIfExists(directory(target).resolve("installed.sha256"));
     }
 
     public static void atomicWrite(Path path, byte[] bytes) throws IOException {
@@ -155,8 +179,9 @@ public final class UpdateApplier {
         try (var channel = FileChannel.open(path, StandardOpenOption.WRITE)) { channel.force(true); }
     }
 
-    private static void finish(Path directory, String version) throws IOException {
-        atomicWrite(directory.resolve("installed.txt"), version.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    private static void finish(Path directory, UpdateManifest manifest) throws IOException {
+        atomicWrite(directory.resolve("installed.sha256"), manifest.sha256().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        atomicWrite(directory.resolve("installed.txt"), manifest.version().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         Files.deleteIfExists(directory.resolve("pending.properties"));
     }
 }
