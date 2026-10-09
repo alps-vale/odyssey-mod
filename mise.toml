@@ -51,6 +51,14 @@ run = "python ci/release.py verify-artifact"
 description = "Announce a GitHub release to Discord and verify the message and attachments"
 run = "python ci/release.py announce"
 
+[tasks.update-manifest]
+description = "Create compatibility metadata for a stable release"
+run = "python ci/update_manifest.py"
+
+[tasks.sign-update-manifest]
+description = "Sign and verify a release manifest using the publisher's private key"
+run = "java ci/ReleaseSigner.java"
+
 [tasks.install]
 description = "Install the production build into the configured PrismLauncher instance"
 run = "python ci/local.py install"

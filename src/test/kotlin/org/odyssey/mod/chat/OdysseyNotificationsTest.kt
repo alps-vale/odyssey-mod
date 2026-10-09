@@ -10,6 +10,7 @@ import org.odyssey.mod.network.BridgeStatus
 import org.odyssey.mod.network.BridgeWarning
 import org.odyssey.mod.network.RankColors
 import org.odyssey.mod.network.RankPresentation
+import org.odyssey.mod.update.UpdateNotice
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -18,6 +19,23 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OdysseyNotificationsTest {
+    @Test fun `update actions reuse Odyssey system source pill palette and literal fallback`() {
+        bootstrapMinecraft()
+        val message = OdysseyNotifications.update(UpdateNotice("Odyssey 0.2.0 is available.", UpdateNotice.Action.INSTALL), true)
+        assertOdysseyPill(message)
+        assertEquals(0xD7DEE8, body(message, "Odyssey 0.2.0 is available.").style.color?.value)
+        val action = message.siblings.last()
+        assertEquals("[Update]", action.string)
+        assertEquals(0x45C9C4, action.style.color?.value)
+        assertTrue(action.style.isUnderlined)
+        assertEquals("/odyssey update install", assertIs<ClickEvent.RunCommand>(action.style.clickEvent).command())
+        assertEquals("Install when Minecraft closes", assertIs<HoverEvent.ShowText>(action.style.hoverEvent).value().string)
+        val fallback = OdysseyNotifications.update(UpdateNotice("Update your instance first.", UpdateNotice.Action.RELEASES, true), false)
+        assertTrue("[Odyssey]" in fallback.string)
+        assertTrue(fallback.string.codePoints().noneMatch { it in 0xE000..0xE0FF })
+        assertEquals(0xFFAA00, body(fallback, "Update your instance first.").style.color?.value)
+        assertIs<ClickEvent.OpenUrl>(fallback.siblings.last().style.clickEvent)
+    }
     @Test
     fun `lifecycle notices use quiet chat milestones with first class identity styling`() {
         bootstrapMinecraft()

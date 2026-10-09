@@ -13,6 +13,7 @@ internal data class OdysseyConfig(
     val autoConnect: Boolean = true,
     val bridgeVisible: Boolean = true,
     val discordRankOverrides: Boolean = true,
+    val autoUpdate: Boolean = false,
 ) {
     companion object {
         private val json = Json { prettyPrint = true }

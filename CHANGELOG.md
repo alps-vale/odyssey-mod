@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Background update checks with the usual Odyssey chat styling.
+- Signed updates that install after Minecraft closes on Windows, Linux, and macOS.
+- Opt-in automatic updates and a retained copy of the previous version.
+- Update commands in the setup guide.
+
 ## 0.1.0
 
 After four months gathering dust in a closet, Odyssey is finally here.

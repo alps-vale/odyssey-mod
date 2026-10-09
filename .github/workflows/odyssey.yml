@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, windows-2025]
+        runner: [ubuntu-24.04, windows-2025, macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -69,7 +69,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version "$RELEASE_VERSION" --metadata build/libs/release-artifact.json --source-sha "$SHA"
           else
-            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.1.0-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
+            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.2.0-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
           fi
 
       # actions/upload-artifact v7.0.2; action.yml runs on node24.
@@ -128,25 +128,41 @@ jobs:
           version="$(mise run --quiet release-version --tag "$TAG")"
           mise run --quiet verify-release-artifact --jar release-artifact/odyssey-mod.jar --metadata release-artifact/release-artifact.json --version "$version" --source-sha "$SHA"
 
+      - name: Sign stable update manifest
+        if: "!contains(github.ref_name, '-')"
+        env:
+          TAG: ${{ github.ref_name }}
+          ODYSSEY_UPDATE_SIGNING_KEY: ${{ secrets.ODYSSEY_UPDATE_SIGNING_KEY }}
+        run: |
+          mise run --quiet update-manifest --jar release-artifact/odyssey-mod.jar --tag "$TAG" --output release-artifact/update.manifest
+          mise run --quiet sign-update-manifest release-artifact/update.manifest src/main/resources/odyssey-update.pub
+
       - name: Create release and upload the same runnable JAR
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          assets=(release-artifact/odyssey-mod.jar)
+          if [[ "$TAG" != *-* ]]; then
+            assets+=(release-artifact/update.manifest release-artifact/update.manifest.sig)
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            if gh release view "$TAG" --json assets --jq '.assets[] | select(.name == "odyssey-mod.jar") | .name' | grep -qx 'odyssey-mod.jar'; then
-              mkdir -p existing-release-asset
-              gh release download "$TAG" --pattern odyssey-mod.jar --dir existing-release-asset
-              cmp --silent release-artifact/odyssey-mod.jar existing-release-asset/odyssey-mod.jar
-            else
-              gh release upload "$TAG" release-artifact/odyssey-mod.jar
-            fi
+            mkdir -p existing-release-asset
+            for asset in "${assets[@]}"; do
+              name="${asset##*/}"
+              if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
+                gh release download "$TAG" --pattern "$name" --dir existing-release-asset
+                cmp --silent "$asset" "existing-release-asset/$name"
+              else
+                gh release upload "$TAG" "$asset"
+              fi
+            done
           elif [[ "$TAG" == v0.1.0 ]]; then
-            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-file CHANGELOG.md
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-file CHANGELOG.md
           elif [[ "$TAG" == *-* ]]; then
-            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --title "Odyssey $TAG" --generate-notes --prerelease --latest=false
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --title "Odyssey $TAG" --generate-notes --prerelease --latest=false
           else
-            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --generate-notes
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --generate-notes
           fi
 
       - name: Announce release to Discord and verify readback

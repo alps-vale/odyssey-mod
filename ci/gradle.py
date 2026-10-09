@@ -14,7 +14,7 @@ def main() -> int:
         return 2
     wrapper = ["cmd.exe", "/d", "/c", "gradlew.bat"] if os.name == "nt" else ["./gradlew"]
     backend = os.environ.get("ODYSSEY_BACKEND_URL", "https://odyssey.notes.supply")
-    version = os.environ.get("ODYSSEY_VERSION") or "0.1.0-SNAPSHOT"
+    version = os.environ.get("ODYSSEY_VERSION") or "0.2.0-SNAPSHOT"
     command = [*wrapper, sys.argv[1], f"-Pbackend_url={backend}", f"-Pmod_version={version}"]
     return subprocess.run(command, check=False).returncode
 

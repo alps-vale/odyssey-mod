@@ -17,11 +17,15 @@ import org.odyssey.mod.network.BackendOrigin
 import org.odyssey.mod.network.BridgeClient
 import org.odyssey.mod.network.JavaOdysseyTransport
 import org.odyssey.mod.network.MinecraftGameAccess
+import org.odyssey.mod.update.OdysseyUpdater
+import org.odyssey.mod.update.UpdateNotice
 
 object OdysseyMod : ClientModInitializer {
     private lateinit var bridge: BridgeClient
     private var lastAddress: String? = null
     private var lastPlayable = false
+    private lateinit var updater: OdysseyUpdater
+    private val updateNotices = ArrayDeque<UpdateNotice>()
 
     override fun onInitializeClient() = OdysseyDiagnostics.callback("client initialization") {
         val origin = BackendOrigin.configured()
@@ -32,6 +36,10 @@ object OdysseyMod : ClientModInitializer {
             .version
             .friendlyString
         val config = OdysseyConfig.load()
+        updater = OdysseyUpdater(version, config) { notice ->
+            Minecraft.getInstance().execute { updateNotices.addLast(notice) }
+        }
+        updater.start()
         GuildChatDecorator.enabled = config.discordRankOverrides
         bridge = BridgeClient(
             JavaOdysseyTransport(origin, version),
@@ -60,6 +68,22 @@ object OdysseyMod : ClientModInitializer {
             OdysseyDiagnostics.callback("client command registration") {
                 dispatcher.register(
                     literal("odyssey")
+                        .then(
+                            literal("update")
+                                .executes { context ->
+                                    context.source.sendFeedback(
+                                        OdysseyNotifications.update(UpdateNotice(updater.status), commandUsesPill()),
+                                    )
+                                    Command.SINGLE_SUCCESS
+                                }
+                                .then(literal("check").executes { updater.check(); Command.SINGLE_SUCCESS })
+                                .then(literal("install").executes { updater.install(); Command.SINGLE_SUCCESS })
+                                .then(
+                                    literal("auto")
+                                        .then(literal("on").executes { updater.setAutomatic(true); Command.SINGLE_SUCCESS })
+                                        .then(literal("off").executes { updater.setAutomatic(false); Command.SINGLE_SUCCESS }),
+                                ),
+                        )
                         .then(
                             literal("status").executes { context ->
                                 OdysseyDiagnostics.callback("status command") {
@@ -94,6 +118,13 @@ object OdysseyMod : ClientModInitializer {
     private fun tick(minecraft: Minecraft) {
         val address = minecraft.currentServer?.ip ?: lastAddress
         val playable = minecraft.level != null && minecraft.player != null
+        if (playable) {
+            while (updateNotices.isNotEmpty()) {
+                minecraft.gui.chat.addMessage(
+                    OdysseyNotifications.update(updateNotices.removeFirst(), commandUsesPill()),
+                )
+            }
+        }
         if (address != lastAddress || playable != lastPlayable) {
             if (address != lastAddress) resetVisualState()
             lastAddress = address

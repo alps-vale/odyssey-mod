@@ -9,9 +9,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import release
+import update_manifest
 
 
 class ReleaseValidationTests(unittest.TestCase):
+    def test_update_manifest_binds_exact_jar_metadata_and_stable_compatibility(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            jar = Path(temp_dir) / 'odyssey-mod.jar'
+            self._jar(jar)
+            with zipfile.ZipFile(jar) as archive:
+                metadata = json.loads(archive.read('fabric.mod.json'))
+            metadata['environment'] = 'client'
+            metadata['depends'] = {key: '>=1' for key in update_manifest.DEPENDENCIES}
+            with zipfile.ZipFile(jar, 'w') as archive:
+                archive.writestr('fabric.mod.json', json.dumps(metadata))
+                archive.writestr('odyssey.mixins.json', '{}')
+                archive.writestr(release.ENTRYPOINT_CLASS, b'class bytes')
+                archive.writestr('updates/odyssey-update-helper.jar', b'helper fixture')
+            output = Path(temp_dir) / 'update.manifest'
+            update_manifest.create_manifest(jar, 'v1.2.3', output)
+            fields = dict(line.split('=', 1) for line in output.read_text().splitlines())
+            self.assertEqual(fields['sha256'], release.sha256_file(jar))
+            self.assertEqual(int(fields['size']), jar.stat().st_size)
+            self.assertEqual(fields['url'], 'https://github.com/alps-vale/odyssey-mod/releases/download/v1.2.3/odyssey-mod.jar')
+            self.assertEqual(fields['requires.java'], '>=1')
+            with self.assertRaises(release.ReleaseError):
+                update_manifest.create_manifest(jar, 'v1.2.3-rc.1', output)
+
     def test_semver_tags_and_prerelease(self) -> None:
         self.assertEqual(release.parse_tag("v1.2.3"), "1.2.3")
         self.assertEqual(release.parse_tag("v0.1.0-rc.2"), "0.1.0-rc.2")

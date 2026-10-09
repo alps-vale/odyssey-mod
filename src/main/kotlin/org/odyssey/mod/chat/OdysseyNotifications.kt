@@ -7,6 +7,9 @@ import net.minecraft.network.chat.Style
 import org.odyssey.mod.network.BridgeStatus
 import org.odyssey.mod.network.BridgeWarning
 import org.odyssey.mod.network.RankColors
+import org.odyssey.mod.update.UpdateManifest
+import org.odyssey.mod.update.UpdateNotice
+import java.net.URI
 
 internal object OdysseyNotifications {
     private const val BRAND_START = 0x45C9C4
@@ -45,6 +48,27 @@ internal object OdysseyNotifications {
 
     fun reconnectRequested(usePill: Boolean): Component =
         notice("Reconnect requested.", NEUTRAL, usePill)
+
+    fun update(update: UpdateNotice, usePill: Boolean): Component {
+        val result = notice(update.text, if (update.warning) WARNING else FROST, usePill).copy()
+        val action = when (update.action) {
+            UpdateNotice.Action.INSTALL -> action(
+                "Update", ClickEvent.RunCommand("/odyssey update install"), "Install when Minecraft closes",
+            )
+            UpdateNotice.Action.RELEASES -> action(
+                "Releases", ClickEvent.OpenUrl(URI.create(UpdateManifest.RELEASES + "latest")), "Open Odyssey releases",
+            )
+            null -> null
+        }
+        if (action != null) result.append(Component.literal(" ")).append(action)
+        return result
+    }
+
+    private fun action(label: String, click: ClickEvent, hover: String): Component =
+        Component.literal("[$label]").withStyle(
+            Style.EMPTY.withColor(BRAND_START).withUnderlined(true)
+                .withClickEvent(click).withHoverEvent(HoverEvent.ShowText(Component.literal(hover))),
+        )
 
     private fun terminal(status: BridgeStatus.Terminal): Component {
         val (body, reconnect) = when (status.code) {
@@ -122,15 +146,7 @@ internal object OdysseyNotifications {
         result.append(body)
         if (reconnect) {
             result.append(Component.literal(" "))
-            result.append(
-                Component.literal("[Reconnect]").withStyle(
-                    Style.EMPTY
-                        .withColor(BRAND_START)
-                        .withUnderlined(true)
-                        .withClickEvent(ClickEvent.RunCommand("/odyssey reconnect"))
-                        .withHoverEvent(HoverEvent.ShowText(Component.literal("Reconnect Odyssey"))),
-                ),
-            )
+            result.append(action("Reconnect", ClickEvent.RunCommand("/odyssey reconnect"), "Reconnect Odyssey"))
         }
         return result
     }
