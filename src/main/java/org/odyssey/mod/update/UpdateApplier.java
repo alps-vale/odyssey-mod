@@ -150,6 +150,13 @@ public final class UpdateApplier {
         } catch (IllegalArgumentException malformed) {
             throw new IOException("Malformed update journal", malformed);
         }
+        String transaction = result.getProperty("transactionId");
+        try {
+            if (transaction == null || !java.util.UUID.fromString(transaction).toString().equals(transaction))
+                throw new IllegalArgumentException("Missing or noncanonical transaction ID");
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Invalid update transaction ID", malformed);
+        }
         return result;
     }
 

@@ -161,6 +161,29 @@ class UpdateApplierTest {
         assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
     }
 
+    @Test void incompleteTransactionIdsAreDiscardedWithoutBlockingReplacementTransactions() throws Exception {
+        Path pending = directory.resolve("pending.properties");
+        var journal = UpdateApplier.load(pending);
+        Files.write(directory.resolve("previous.jar"), previous);
+        for (String id : new String[]{"", "not-a-uuid", "1-1-1-1-1"}) {
+            journal.setProperty("transactionId", id);
+            try (var output = Files.newOutputStream(pending)) { journal.store(output, null); }
+            assertThrows(IOException.class, () -> UpdateApplier.load(pending));
+            assertEquals(UpdateApplier.PendingState.DISCARDED, UpdateApplier.reconcile(target, key.getPublic()));
+            assertFalse(Files.exists(pending));
+        }
+        journal.remove("transactionId");
+        try (var output = Files.newOutputStream(pending)) { journal.store(output, null); }
+        assertEquals(UpdateApplier.PendingState.DISCARDED, UpdateApplier.reconcile(target, key.getPublic()));
+        assertArrayEquals(previous, Files.readAllBytes(target));
+        assertArrayEquals(previous, Files.readAllBytes(directory.resolve("previous.jar")));
+        journal.setProperty("transactionId", UUID.randomUUID().toString());
+        try (var output = Files.newOutputStream(pending)) { journal.store(output, null); }
+        assertEquals(UpdateApplier.PendingState.PENDING, UpdateApplier.reconcile(target, key.getPublic()));
+        UpdateApplier.apply(target, key.getPublic());
+        assertFalse(Files.exists(pending));
+    }
+
     @Test void enablingAutomaticUpdatesOnHealthyInstallPreservesFutureRollbackDetection() throws Exception {
         UpdateApplier.apply(target, key.getPublic());
         UpdateApplier.acknowledgeRollback(target);

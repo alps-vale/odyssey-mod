@@ -28,9 +28,15 @@ SEMVER = re.compile(
 MOD_ID = "odyssey"
 ENTRYPOINT_CLASS = "org/odyssey/mod/OdysseyMod.class"
 RECEIPT_NAME = "discord-announcement.json"
-NOTES_NAME = "odyssey-changelog.md"
 JAR_NAME = "odyssey-mod.jar"
 CHANNEL_ID = "1558187887579627600"
+# Verified against the live Odyssey backend's Discord bot, not a separate release identity.
+WAYFINDER_NAME = "Wayfinder"
+WAYFINDER_AVATAR = (
+    "https://cdn.discordapp.com/avatars/1533129281956347925/"
+    "a_488f6d48c534b12dfe5c36c87bd40a70.gif?size=1024"
+)
+COMPONENTS_V2 = 1 << 15
 RUNTIME_REQUIREMENTS = (
     "Minecraft 1.21.11 · Java 25+ · Fabric Loader 0.19.3+ · "
     "Fabric API 0.141.6+1.21.11 · "
@@ -99,41 +105,46 @@ def validate_jar(path: Path, version: str) -> dict[str, Any]:
     }
 
 
-def discord_payload(tag: str, body: str, release_url: str, source_sha: str) -> dict[str, Any]:
-    """Make a bounded changelog embed; the full body is separately attached."""
-    title = f"Odyssey {tag} released"
-    footer = f"{RUNTIME_REQUIREMENTS}\nSource: {source_sha[:12]}"
-    fixed_chars = len(title) + len(footer) + len(release_url)
-    description_limit = min(4096, 6000 - fixed_chars)
+def discord_payload(tag: str, body: str, release_url: str, jar_url: str) -> dict[str, Any]:
+    """A single ordered card: changelog first, version links and attached JAR last."""
+    title = f"## Odyssey {tag} released"
+    description = body.strip() or "See the release notes for details."
+    suffix = f"\n\n[Full release notes]({release_url})"
+    links = (f"[Download {JAR_NAME}]({jar_url}) · [Release notes]({release_url})\n"
+             f"-# {RUNTIME_REQUIREMENTS}")
+    description_limit = 4000 - len(title) - len(links) - len(suffix) - 3
     if description_limit < 64:
-        raise ReleaseError("Release metadata leaves no room for a Discord changelog embed.")
-    description = body.strip() or "See the attached changelog for release details."
+        raise ReleaseError("Release metadata leaves no room for the Discord changelog.")
     if len(description) > description_limit:
-        description = description[: description_limit - 36].rstrip() + "\n\n… Full notes attached."
+        description = description[:description_limit].rstrip() + "…" + suffix
     return {
+        "username": WAYFINDER_NAME,
+        "avatar_url": WAYFINDER_AVATAR,
+        "flags": COMPONENTS_V2,
         "allowed_mentions": {"parse": [], "users": [], "roles": []},
-        "embeds": [
+        "components": [
             {
-                "title": title,
-                "url": release_url,
-                "description": description,
-                "footer": {"text": footer},
+                "type": 17,
+                "accent_color": 0x42B8B5,
+                "components": [
+                    {"type": 10, "content": f"{title}\n\n{description}"},
+                    {"type": 14, "divider": True, "spacing": 1},
+                    {"type": 10, "content": links},
+                    {"type": 13, "file": {"url": f"attachment://{JAR_NAME}"}},
+                ],
             }
         ],
         "attachments": [
             {"id": 0, "filename": JAR_NAME, "description": "Runnable remapped Fabric mod"},
-            {"id": 1, "filename": NOTES_NAME, "description": "Complete GitHub release notes"},
         ],
     }
 
 
-def verify_embed(payload: dict[str, Any]) -> None:
-    embed = payload["embeds"][0]
-    total = len(embed.get("title", "")) + len(embed.get("description", ""))
-    total += len(embed.get("footer", {}).get("text", ""))
-    total += len(embed.get("url", ""))
-    if len(embed.get("description", "")) > 4096 or total > 6000:
-        raise ReleaseError("Discord embed exceeds the description or total-character limit.")
+def verify_payload(payload: dict[str, Any]) -> None:
+    texts = [component["content"] for component in payload["components"][0]["components"]
+             if component["type"] == 10]
+    if sum(map(len, texts)) > 4000:
+        raise ReleaseError("Discord release card exceeds its text limits.")
     if payload.get("allowed_mentions") != {"parse": [], "users": [], "roles": []}:
         raise ReleaseError("Discord payload does not explicitly suppress all mention parsing.")
 
@@ -208,29 +219,46 @@ def _download(url: str) -> bytes:
         raise ReleaseError(f"Discord attachment download failed: {error}") from error
 
 
-def verify_message(message: dict[str, Any], *, expected_jar: bytes, expected_notes: bytes,
-                   release_url: str, tag: str, source_sha: str, expected_body: str) -> None:
-    embeds = message.get("embeds", [])
-    if (len(embeds) != 1 or embeds[0].get("url") != release_url
-            or embeds[0].get("title") != f"Odyssey {tag} released"):
-        raise ReleaseError("Discord readback does not contain the expected release embed.")
-    expected_payload = discord_payload(tag, expected_body, release_url, source_sha)
-    expected_embed = expected_payload["embeds"][0]
-    embed = embeds[0]
-    if (embed.get("description") != expected_embed["description"]
-            or embed.get("footer", {}).get("text") != expected_embed["footer"]["text"]):
-        raise ReleaseError("Discord readback changelog/footer differs from the release payload.")
+def verify_message(message: dict[str, Any], *, expected_jar: bytes,
+                   release_url: str, jar_url: str, tag: str, expected_body: str,
+                   expected_username: str = WAYFINDER_NAME) -> None:
+    expected = discord_payload(tag, expected_body, release_url, jar_url)
+    cards = message.get("components", [])
+    if (not message.get("flags", 0) & COMPONENTS_V2 or message.get("embeds")
+            or len(cards) != 1 or cards[0].get("type") != 17
+            or cards[0].get("accent_color") != expected["components"][0]["accent_color"]):
+        raise ReleaseError("Discord readback does not contain the expected ordered release card.")
+    components = cards[0].get("components", [])
+    expected_components = expected["components"][0]["components"]
+    if (len(components) != len(expected_components)
+            or any(actual.get("type") != wanted["type"]
+                   or (wanted["type"] == 10 and actual.get("content") != wanted["content"])
+                   for actual, wanted in zip(components, expected_components))):
+        raise ReleaseError("Discord readback changelog, version links, or component order differs.")
+    author = message.get("author", {})
+    if author.get("username") != expected_username:
+        raise ReleaseError("Discord announcement did not use the expected sender name.")
+    if expected_username == WAYFINDER_NAME and not author.get("avatar"):
+        raise ReleaseError("Discord announcement did not use Wayfinder's avatar.")
     if message.get("channel_id") != CHANNEL_ID:
         raise ReleaseError("Discord readback message is not in the configured release channel.")
     if message.get("mention_everyone") is not False or message.get("mentions") or message.get("mention_roles"):
         raise ReleaseError("Discord readback reports an unintended mention.")
     attachments = {entry.get("filename"): entry for entry in message.get("attachments", [])}
-    if set(attachments) != {JAR_NAME, NOTES_NAME}:
-        raise ReleaseError("Discord message must have exactly the runnable JAR and full changelog.")
-    if _download(attachments[JAR_NAME]["url"]) != expected_jar:
+    if attachments and (len(message.get("attachments", [])) != 1 or set(attachments) != {JAR_NAME}):
+        raise ReleaseError("Discord message must attach only the runnable JAR.")
+    # Components V2 files may live only in the File component, not message.attachments.
+    displayed = components[-1]
+    attachment = attachments.get(JAR_NAME, {})
+    if displayed.get("name", attachment.get("filename")) != JAR_NAME:
+        raise ReleaseError("Discord release card does not display the runnable JAR last.")
+    download_url = displayed.get("file", {}).get("url")
+    if download_url == f"attachment://{JAR_NAME}":
+        download_url = attachment.get("url")
+    if not download_url or (attachment and download_url != attachment.get("url")):
+        raise ReleaseError("Discord file component and attachment metadata disagree.")
+    if _download(download_url) != expected_jar:
         raise ReleaseError("Discord-attached JAR bytes differ from the promoted release artifact.")
-    if _download(attachments[NOTES_NAME]["url"]) != expected_notes:
-        raise ReleaseError("Discord changelog attachment differs from the complete release notes.")
 
 
 def receipt_allows_reuse(receipt: dict[str, Any], *, tag: str, source_sha: str,
@@ -296,8 +324,8 @@ def _verify_github_jar(repository: str, tag: str, expected_jar: bytes,
             raise ReleaseError("GitHub release JAR bytes differ from the build-job artifact.")
 
 
-def _multipart(payload: dict[str, Any], jar: bytes, notes: bytes) -> tuple[str, bytes]:
-    boundary = "----OdysseyRelease" + hashlib.sha256(jar + notes).hexdigest()[:24]
+def _multipart(payload: dict[str, Any], jar: bytes) -> tuple[str, bytes]:
+    boundary = "----OdysseyRelease" + hashlib.sha256(jar).hexdigest()[:24]
     parts: list[bytes] = []
     fields = {"payload_json": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
     for name, value in fields.items():
@@ -311,7 +339,7 @@ def _multipart(payload: dict[str, Any], jar: bytes, notes: bytes) -> tuple[str, 
             ]
         )
     for index, (filename, content, content_type) in enumerate(
-        ((JAR_NAME, jar, "application/java-archive"), (NOTES_NAME, notes, "text/markdown"))
+        ((JAR_NAME, jar, "application/java-archive"),)
     ):
         parts.extend(
             [
@@ -336,18 +364,19 @@ def announce(tag: str, repository: str, source_sha: str, jar_path: Path) -> str:
     release = _load_release(repository, tag)
     release_url = release["url"]
     _verify_github_jar(repository, tag, jar_bytes, release)
+    jar_url = next(asset["url"] for asset in release["assets"] if asset["name"] == JAR_NAME)
     notes_text = release.get("body", "")
     notes_bytes = (notes_text.rstrip() + "\n").encode("utf-8")
     notes_sha = hashlib.sha256(notes_bytes).hexdigest()
-    payload = discord_payload(tag, notes_text, release_url, source_sha)
-    verify_embed(payload)
+    payload = discord_payload(tag, notes_text, release_url, jar_url)
+    verify_payload(payload)
     existing = _receipt_asset(repository, tag, release)
     if existing is not None:
         message_id = receipt_allows_reuse(existing, tag=tag, source_sha=source_sha,
                                           jar_sha=jar_sha, notes_sha=notes_sha)
         message = _discord_readback(webhook_url, message_id)
-        verify_message(message, expected_jar=jar_bytes, expected_notes=notes_bytes,
-                       release_url=release_url, tag=tag, source_sha=source_sha,
+        verify_message(message, expected_jar=jar_bytes,
+                       release_url=release_url, jar_url=jar_url, tag=tag,
                        expected_body=notes_text)
         return f"Verified existing Discord announcement {message_id} (no repost)."
 
@@ -362,10 +391,11 @@ def announce(tag: str, repository: str, source_sha: str, jar_path: Path) -> str:
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _upload_receipt(repository, tag, receipt)
-    content_type, body = _multipart(payload, jar_bytes, notes_bytes)
+    content_type, body = _multipart(payload, jar_bytes)
     parsed = urllib.parse.urlsplit(webhook_url)
     query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    query = [(key, value) for key, value in query if key != "wait"] + [("wait", "true")]
+    query = [(key, value) for key, value in query if key not in ("wait", "with_components")]
+    query += [("wait", "true"), ("with_components", "true")]
     execute_url = urllib.parse.urlunsplit(
         (parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), "")
     )
@@ -378,12 +408,12 @@ def announce(tag: str, repository: str, source_sha: str, jar_path: Path) -> str:
     message_id = posted.get("id")
     if not isinstance(message_id, str) or not message_id:
         raise ReleaseError("Discord execute webhook did not return the created message ID.")
-    verify_message(posted, expected_jar=jar_bytes, expected_notes=notes_bytes,
-                   release_url=release_url, tag=tag, source_sha=source_sha,
+    verify_message(posted, expected_jar=jar_bytes,
+                   release_url=release_url, jar_url=jar_url, tag=tag,
                    expected_body=notes_text)
     readback = _discord_readback(webhook_url, message_id)
-    verify_message(readback, expected_jar=jar_bytes, expected_notes=notes_bytes,
-                   release_url=release_url, tag=tag, source_sha=source_sha,
+    verify_message(readback, expected_jar=jar_bytes,
+                   release_url=release_url, jar_url=jar_url, tag=tag,
                    expected_body=notes_text)
     receipt.update({"state": "sent", "message_id": message_id,
                     "channel_id": posted["channel_id"],

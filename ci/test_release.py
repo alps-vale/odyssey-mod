@@ -5,6 +5,10 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from copy import deepcopy
+from email.parser import BytesParser
+from email.policy import default
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -67,14 +71,61 @@ class ReleaseValidationTests(unittest.TestCase):
             with self.assertRaises(release.ReleaseError):
                 release.validate_jar(dev_jar, "1.2.3")
 
-    def test_embed_is_bounded_preserves_full_notes_as_attachment_and_disables_mentions(self) -> None:
+    def test_ordered_card_bounds_notes_and_attaches_only_jar_after_version_links(self) -> None:
         body = "@everyone <@123456> " + ("release notes " * 1000)
-        payload = release.discord_payload("v1.2.3", body, "https://github.com/alps-vale/odyssey-mod/releases/tag/v1.2.3", "a" * 40)
-        release.verify_embed(payload)
+        release_url = "https://github.com/alps-vale/odyssey-mod/releases/tag/v1.2.3"
+        jar_url = "https://github.com/alps-vale/odyssey-mod/releases/download/v1.2.3/odyssey-mod.jar"
+        payload = release.discord_payload("v1.2.3", body, release_url, jar_url)
+        release.verify_payload(payload)
         self.assertEqual(payload["allowed_mentions"], {"parse": [], "users": [], "roles": []})
-        self.assertLessEqual(len(payload["embeds"][0]["description"]), 4096)
-        self.assertIn(release.JAR_NAME, {item["filename"] for item in payload["attachments"]})
-        self.assertIn(release.NOTES_NAME, {item["filename"] for item in payload["attachments"]})
+        self.assertEqual(payload["username"], "Wayfinder")
+        self.assertEqual(payload["avatar_url"], release.WAYFINDER_AVATAR)
+        self.assertEqual(payload["flags"], release.COMPONENTS_V2)
+        card = payload["components"][0]["components"]
+        self.assertLessEqual(sum(len(c["content"]) for c in card if c["type"] == 10), 4000)
+        self.assertIn("Full release notes", card[0]["content"])
+        self.assertIn(jar_url, card[-2]["content"])
+        self.assertEqual(card[-1], {"type": 13, "file": {"url": "attachment://odyssey-mod.jar"}})
+        self.assertEqual([item["filename"] for item in payload["attachments"]], [release.JAR_NAME])
+        content_type, data = release._multipart(payload, b"real fixture bytes")
+        parsed = BytesParser(policy=default).parsebytes(
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + data)
+        files = [part for part in parsed.iter_parts() if part.get_filename()]
+        self.assertEqual([part.get_filename() for part in files], [release.JAR_NAME])
+        self.assertEqual(files[0].get_payload(decode=True), b"real fixture bytes")
+
+    def test_readback_rejects_wrong_order_extra_attachment_or_different_jar(self) -> None:
+        url = "https://github.com/alps-vale/odyssey-mod/releases/tag/v1.2.3"
+        jar_url = "https://github.com/alps-vale/odyssey-mod/releases/download/v1.2.3/odyssey-mod.jar"
+        message = release.discord_payload("v1.2.3", "Changes", url, jar_url)
+        message.update({"channel_id": release.CHANNEL_ID, "mention_everyone": False,
+                        "mentions": [], "mention_roles": [],
+                        "author": {"username": "Wayfinder", "avatar": "verified-avatar"}})
+        message["attachments"][0]["url"] = "https://cdn.discordapp.com/fixture.jar"
+        # Discord adds IDs and resolves attachment:// to the uploaded file's CDN URL.
+        message["components"][0]["id"] = 1
+        message["components"][0]["components"][-1]["file"]["url"] = message["attachments"][0]["url"]
+        def verify(candidate):
+            release.verify_message(candidate, expected_jar=b"jar", release_url=url, jar_url=jar_url,
+                                   tag="v1.2.3", expected_body="Changes")
+        with patch.object(release, "_download", return_value=b"jar"):
+            verify(message)
+            components_only = deepcopy(message)
+            components_only["attachments"] = []
+            components_only["components"][0]["components"][-1]["name"] = release.JAR_NAME
+            verify(components_only)
+            wrong_order = deepcopy(message)
+            wrong_order["components"][0]["components"].reverse()
+            extra_file = deepcopy(message)
+            extra_file["attachments"].append({"filename": "unnecessary.md", "url": "https://example.invalid"})
+            wrong_sender = deepcopy(message)
+            wrong_sender["author"]["username"] = "Wrong bot"
+            missing_avatar = deepcopy(message)
+            missing_avatar["author"]["avatar"] = None
+            for invalid in (wrong_order, extra_file, wrong_sender, missing_avatar):
+                with self.assertRaises(release.ReleaseError): verify(invalid)
+        with patch.object(release, "_download", return_value=b"different jar"):
+            with self.assertRaises(release.ReleaseError): verify(message)
 
     def test_pending_or_mismatched_receipt_never_authorizes_a_repost(self) -> None:
         base = {"tag": "v1.2.3", "source_sha": "abc", "jar_sha256": "def",

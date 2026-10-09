@@ -6,6 +6,7 @@
 - Signed updates that install after Minecraft closes on Windows, Linux, and macOS.
 - Opt-in automatic updates and a retained copy of the previous version.
 - Update commands in the setup guide.
+- Wayfinder release announcements with the changelog first, a version download link, and just the JAR attached.
 
 ## 0.1.0
 
