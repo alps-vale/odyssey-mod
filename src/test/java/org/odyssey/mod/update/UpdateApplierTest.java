@@ -56,6 +56,7 @@ class UpdateApplierTest {
         var journal = new Properties();
         journal.setProperty("target", target.toString());
         journal.setProperty("previousSha256", UpdateManifest.digest(target));
+        journal.setProperty("transactionId", UUID.randomUUID().toString());
         try (var output = Files.newOutputStream(directory.resolve("pending.properties"))) { journal.store(output, null); }
     }
 
@@ -100,6 +101,34 @@ class UpdateApplierTest {
                     () -> UpdateApplier.apply(target, key.getPublic()));
         }
         assertArrayEquals(previous, Files.readAllBytes(target));
+    }
+
+    @Test void manualRecoveryAndCorruptedStageDoNotPermanentlyBlockFutureUpdates() throws Exception {
+        Files.writeString(target, "a newer manual installation");
+        assertEquals(UpdateApplier.PendingState.DISCARDED, UpdateApplier.reconcile(target, key.getPublic()));
+        assertEquals("a newer manual installation", Files.readString(target));
+        assertEquals(UpdateApplier.PendingState.NONE, UpdateApplier.reconcile(target, key.getPublic()));
+        Files.write(target, previous);
+        var journal = new Properties();
+        journal.setProperty("target", target.toString());
+        journal.setProperty("previousSha256", UpdateManifest.digest(target));
+        journal.setProperty("transactionId", UUID.randomUUID().toString());
+        try (var output = Files.newOutputStream(directory.resolve("pending.properties"))) { journal.store(output, null); }
+        Files.delete(directory.resolve("pending.jar"));
+        assertEquals(UpdateApplier.PendingState.DISCARDED, UpdateApplier.reconcile(target, key.getPublic()));
+        assertArrayEquals(previous, Files.readAllBytes(target));
+        assertFalse(Files.exists(directory.resolve("pending.properties")));
+    }
+
+    @Test void oldHelperCannotApplyAReplacementTransaction() throws Exception {
+        var journal = UpdateApplier.load(directory.resolve("pending.properties"));
+        String oldId = journal.getProperty("transactionId");
+        journal.setProperty("transactionId", UUID.randomUUID().toString());
+        try (var output = Files.newOutputStream(directory.resolve("pending.properties"))) { journal.store(output, null); }
+        assertThrows(IOException.class, () -> UpdateApplier.apply(target, key.getPublic(), oldId));
+        assertArrayEquals(previous, Files.readAllBytes(target));
+        assertTrue(Files.exists(directory.resolve("pending.properties")));
+        UpdateApplier.apply(target, key.getPublic(), journal.getProperty("transactionId"));
     }
 
     @Test void standaloneHelpersWaitForActualParentExitAndHandleDuplicateLaunches() throws Exception {
@@ -167,7 +196,8 @@ class UpdateApplierTest {
 
     private Process helper(Path jar, Process parent) throws Exception {
         return new ProcessBuilder(java(), "-jar", jar.toString(), target.toString(),
-                Long.toString(parent.pid()), parent.toHandle().info().startInstant().orElseThrow().toString())
+                Long.toString(parent.pid()), parent.toHandle().info().startInstant().orElseThrow().toString(),
+                UpdateApplier.load(directory.resolve("pending.properties")).getProperty("transactionId"))
                 .redirectErrorStream(true).start();
     }
 

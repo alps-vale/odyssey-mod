@@ -13,6 +13,7 @@ import java.nio.file.StandardOpenOption
 import java.time.Duration
 import java.time.Instant
 import java.util.Properties
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -40,21 +41,10 @@ internal class OdysseyUpdater(
         private set
 
     fun start() = submit(false) {
-        if (target != null && Files.exists(UpdateApplier.directory(target).resolve("pending.properties"))) {
-            val directory = UpdateApplier.directory(target)
-            val manifest = UpdateManifest.verify(
-                UpdateManifest.readLimited(directory.resolve("update.manifest"), UpdateManifest.MAX_MANIFEST),
-                UpdateManifest.readLimited(directory.resolve("update.manifest.sig"), 64), UpdateManifest.releaseKey(),
-            )
-            if (UpdateManifest.digest(target) == manifest.sha256()) {
-                UpdateApplier.apply(target, UpdateManifest.releaseKey())
-                status = "Odyssey ${manifest.version()} is installed."
-                notify(UpdateNotice(status))
-            } else {
-                // Don't endlessly retry a failed transaction. A user can request another attempt.
-                status = "The last update was not installed. Use /odyssey update install to retry."
-                notify(UpdateNotice(status, warning = true))
-            }
+        if (pendingState() == UpdateApplier.PendingState.PENDING) {
+            // Don't endlessly retry a failed transaction. A user can request another attempt.
+            status = "The last update was not installed. Use /odyssey update install to retry."
+            notify(UpdateNotice(status, warning = true))
         } else {
             target?.let { jar ->
                 val receipt = UpdateApplier.directory(jar).resolve("installed.txt")
@@ -73,7 +63,7 @@ internal class OdysseyUpdater(
     fun install() = submit(true) {
         val jar = target ?: error("This instance needs a manual update.")
         val directory = UpdateApplier.directory(jar)
-        if (Files.exists(directory.resolve("pending.properties"))) {
+        if (pendingState() == UpdateApplier.PendingState.PENDING) {
             // This also covers recovery after Minecraft/helper was killed before installation.
             val manifest = UpdateManifest.verify(UpdateManifest.readLimited(directory.resolve("update.manifest"), UpdateManifest.MAX_MANIFEST),
                 UpdateManifest.readLimited(directory.resolve("update.manifest.sig"), 64), UpdateManifest.releaseKey())
@@ -98,7 +88,7 @@ internal class OdysseyUpdater(
     }
 
     private fun checkRelease(manual: Boolean, installAutomatic: Boolean = true) {
-        if (target != null && Files.exists(UpdateApplier.directory(target).resolve("pending.properties"))) {
+        if (pendingState() == UpdateApplier.PendingState.PENDING) {
             if (manual) notify(UpdateNotice(status))
             return
         }
@@ -161,6 +151,7 @@ internal class OdysseyUpdater(
                 val properties = Properties().apply {
                     setProperty("target", jar.toString())
                     setProperty("previousSha256", UpdateManifest.digest(jar))
+                    setProperty("transactionId", UUID.randomUUID().toString())
                 }
                 val journal = ByteArrayOutputStream().apply { properties.store(this, "Odyssey pending update") }
                 UpdateApplier.atomicWrite(directory.resolve("pending.properties"), journal.toByteArray())
@@ -190,10 +181,15 @@ internal class OdysseyUpdater(
         val java = Path.of(System.getProperty("java.home"), "bin",
             if (System.getProperty("os.name").startsWith("Windows")) "java.exe" else "java")
         ProcessBuilder(java.toString(), "-jar", helper.toString(), jar.toString(),
-            process.pid().toString(), start.toString())
+            process.pid().toString(), start.toString(),
+            UpdateApplier.load(directory.resolve("pending.properties")).getProperty("transactionId"))
             .redirectOutput(ProcessBuilder.Redirect.appendTo(directory.resolve("helper.log").toFile()))
             .redirectErrorStream(true).start()
     }
+
+    private fun pendingState(): UpdateApplier.PendingState = target?.let {
+        UpdateApplier.reconcile(it, UpdateManifest.releaseKey())
+    } ?: UpdateApplier.PendingState.NONE
 
     private fun installedJar(): Path? = runCatching {
         val origin = loader.getModContainer("odyssey").orElseThrow().origin

@@ -13,7 +13,7 @@ public final class UpdateApplier {
 
     public static void main(String[] args) {
         try {
-            if (args.length != 3) throw new IOException("Expected target, parent PID and start time");
+            if (args.length != 4) throw new IOException("Expected target, parent PID, start time and transaction ID");
             var target = Path.of(args[0]);
             long pid = Long.parseLong(args[1]);
             Instant start = Instant.parse(args[2]);
@@ -24,7 +24,7 @@ public final class UpdateApplier {
                     throw new IOException("Game process identity changed");
                 parent.get().onExit().get(7, TimeUnit.DAYS);
             }
-            apply(target, UpdateManifest.releaseKey());
+            apply(target, UpdateManifest.releaseKey(), args[3]);
         } catch (Exception error) {
             System.err.println("Odyssey update not installed: " + error.getClass().getSimpleName());
             System.exit(1);
@@ -36,6 +36,10 @@ public final class UpdateApplier {
     }
 
     public static void apply(Path target, java.security.PublicKey key) throws Exception {
+        apply(target, key, null);
+    }
+
+    public static void apply(Path target, java.security.PublicKey key, String expectedTransaction) throws Exception {
         target = target.toAbsolutePath().normalize();
         var directory = directory(target);
         validatePaths(target, directory);
@@ -43,6 +47,8 @@ public final class UpdateApplier {
                 StandardOpenOption.WRITE); var lock = channel.tryLock()) {
             if (lock == null) throw new IOException("Another updater owns this transaction");
             var journal = load(directory.resolve("pending.properties"));
+            if (expectedTransaction != null && !expectedTransaction.equals(journal.getProperty("transactionId")))
+                throw new IOException("Update transaction was replaced");
             if (!target.toString().equals(journal.getProperty("target")))
                 throw new IOException("Update target changed");
             var manifest = UpdateManifest.verify(UpdateManifest.readLimited(directory.resolve("update.manifest"), UpdateManifest.MAX_MANIFEST),
@@ -81,6 +87,39 @@ public final class UpdateApplier {
                 }
             }
             throw failure;
+        }
+    }
+
+    public enum PendingState { NONE, PENDING, COMPLETED, DISCARDED }
+
+    /** Drop only obsolete transaction state; never undo a manual installation or remove its backup. */
+    public static PendingState reconcile(Path target, java.security.PublicKey key) throws Exception {
+        Path directory = directory(target);
+        Path pending = directory.resolve("pending.properties");
+        if (!Files.exists(pending)) return PendingState.NONE;
+        validatePaths(target, directory);
+        try (var channel = FileChannel.open(directory.resolve("lock"), StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE); var lock = channel.tryLock()) {
+            if (lock == null) throw new IOException("Another updater owns this transaction");
+            if (!Files.exists(pending)) return PendingState.NONE;
+            try {
+                var journal = load(pending);
+                if (!target.toString().equals(journal.getProperty("target"))) throw new IOException("Target changed");
+                var manifest = UpdateManifest.verify(UpdateManifest.readLimited(directory.resolve("update.manifest"),
+                                UpdateManifest.MAX_MANIFEST),
+                        UpdateManifest.readLimited(directory.resolve("update.manifest.sig"), 64), key);
+                String current = UpdateManifest.digest(target);
+                if (current.equals(manifest.sha256())) {
+                    finish(directory, manifest.version());
+                    return PendingState.COMPLETED;
+                }
+                if (!current.equals(journal.getProperty("previousSha256"))) throw new IOException("Manual installation");
+                manifest.verifyJar(directory.resolve("pending.jar"));
+                return PendingState.PENDING;
+            } catch (IOException | java.security.GeneralSecurityException invalid) {
+                Files.delete(pending);
+                return PendingState.DISCARDED;
+            }
         }
     }
 
