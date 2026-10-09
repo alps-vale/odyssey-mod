@@ -30,6 +30,9 @@ class UpdateApplierTest {
         target = mods.resolve("My Odyssey.jar").toAbsolutePath().normalize();
         previous = "previous installed version".getBytes(StandardCharsets.UTF_8);
         Files.write(target, previous);
+        // macOS temp roots may begin at /var (a symlink to /private/var).
+        // The runtime resolves Fabric's installed JAR to its real path too.
+        target = target.toRealPath();
         Files.writeString(mods.resolve("unrelated-mod.jar"), "leave this alone");
         directory = Files.createDirectory(UpdateApplier.directory(target));
         metadata = ("{\"id\":\"odyssey\",\"version\":\"0.2.0\",\"environment\":\"client\",\"depends\":{"
