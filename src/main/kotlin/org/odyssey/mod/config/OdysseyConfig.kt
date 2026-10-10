@@ -13,10 +13,10 @@ internal data class OdysseyConfig(
     val autoConnect: Boolean = true,
     val bridgeVisible: Boolean = true,
     val discordRankOverrides: Boolean = true,
-    val autoUpdate: Boolean = false,
+    val autoUpdate: Boolean = true,
 ) {
     companion object {
-        private val json = Json { prettyPrint = true }
+        private val json = Json { prettyPrint = true; encodeDefaults = true }
         private val path by lazy {
             FabricLoader.getInstance().configDir.resolve("odyssey.json")
         }

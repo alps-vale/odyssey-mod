@@ -3,6 +3,7 @@ package org.odyssey.mod.update
 import org.junit.jupiter.api.io.TempDir
 import org.odyssey.mod.config.OdysseyConfig
 import java.nio.file.Path
+import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -13,6 +14,21 @@ import kotlin.test.assertTrue
 
 class OdysseyUpdaterTest {
     @TempDir lateinit var root: Path
+
+    @Test fun `automatic updates default on unless explicitly disabled`() {
+        val path = root.resolve("config/odyssey.json")
+        assertTrue(OdysseyConfig.load(path).autoUpdate)
+        assertTrue(OdysseyConfig.load(path).autoUpdate)
+        Files.writeString(path, """{"autoConnect":false,"bridgeVisible":true}""")
+        val legacy = OdysseyConfig.load(path)
+        assertTrue(legacy.autoUpdate)
+        assertFalse(legacy.autoConnect)
+        assertTrue(OdysseyConfig.load(path).autoUpdate)
+        OdysseyConfig.save(legacy.copy(autoUpdate = true), path)
+        assertTrue(OdysseyConfig.load(path).autoUpdate)
+        OdysseyConfig.save(legacy.copy(autoUpdate = false), path)
+        assertFalse(OdysseyConfig.load(path).autoUpdate)
+    }
 
     @Test fun `opt-out survives restart while the update worker is occupied`() {
         val worker = Executors.newSingleThreadExecutor()

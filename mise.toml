@@ -33,7 +33,15 @@ run = "python ci/gradle.py build"
 
 [tasks.ci]
 description = "Run workflow lint and the complete Gradle build/test graph"
-depends = ["workflow-lint", "test-release", "build"]
+depends = ["workflow-lint", "test-release", "build-ci"]
+
+[tasks.build-ci]
+description = "Build, test, and bundle compiled cross-platform updater checks"
+run = "python ci/gradle.py ci"
+
+[tasks.test-native]
+description = "Run the compiled updater checks without Gradle or Minecraft"
+run = "python ci/native_tests.py"
 
 [tasks.release-version]
 description = "Validate a release tag and print its SemVer value"
