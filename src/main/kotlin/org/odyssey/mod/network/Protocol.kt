@@ -222,7 +222,14 @@ internal object ProtocolCodec {
                         '\n' !in message.content && '\r' !in message.content,
                 ) { "Invalid guild-chat body" }
                 require(message.itemShares.size <= MAX_ITEM_SHARES) { "Too many item shares" }
-                require(message.itemShares.map { it.encoded }.distinct().size == message.itemShares.size)
+                message.itemShares.forEachIndexed { index, share ->
+                    if (share.kind == ItemShareKind.WYNNTILS) {
+                        require(message.itemShares.take(index).none { it.encoded == share.encoded })
+                    } else {
+                        require(message.itemShares.count { it.encoded == share.encoded } <=
+                            countOccurrences(message.content, share.encoded))
+                    }
+                }
                 message.itemShares.forEach {
                     require(it.encoded.isNotEmpty() && it.encoded in message.content)
                     require(isSafeRemoteText(it.name, 128) && it.color in 0..MAX_RGB)
@@ -343,6 +350,18 @@ internal object ProtocolCodec {
 
     private fun requireFrameSize(text: String, limit: Int = MAX_FRAME_BYTES) {
         require(text.toByteArray(Charsets.UTF_8).size <= limit) { "WebSocket frame exceeds its size limit" }
+    }
+
+    private fun countOccurrences(content: String, reference: String): Int {
+        if (reference.isEmpty()) return 0
+        var count = 0
+        var offset = 0
+        while (true) {
+            val next = content.indexOf(reference, offset)
+            if (next < 0) return count
+            count += 1
+            offset = next + reference.length
+        }
     }
 
     private fun requireUuid(value: String) {

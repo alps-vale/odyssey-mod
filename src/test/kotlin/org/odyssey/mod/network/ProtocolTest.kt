@@ -51,6 +51,17 @@ class ProtocolTest {
     }
 
     @Test
+    fun `same labelled native items require distinct nonoverlapping references`() {
+        val first = ItemShare(ItemShareKind.WYNNCRAFT, "[Bow]", "Bow", 0xaa00aa)
+        val second = first.copy(png = "AAAA")
+        val message = ClientMessage.GuildObservation(2, "22222222-2222-4222-8222-222222222222", "Alice", "[Bow] [Bow]", listOf(first, second))
+        assertEquals(message, ProtocolCodec.decodeClient(ProtocolFrame.Text(ProtocolCodec.encode(message))))
+        assertFails { ProtocolCodec.encode(message.copy(content = "[Bow]")) }
+        assertFails { ProtocolCodec.encode(message.copy(content = "aaa", itemShares = listOf(first.copy(encoded = "aa"), second.copy(encoded = "aa")))) }
+        assertFails { ProtocolCodec.encode(message.copy(itemShares = listOf(first.copy(encoded = "")))) }
+    }
+
+    @Test
     fun `server fixtures round trip`() {
         val messages = serverFixtures.map(::fixture).map {
             val decoded = ProtocolCodec.decodeServer(ProtocolFrame.Text(it))

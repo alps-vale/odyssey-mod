@@ -34,7 +34,8 @@ then run `/odyssey reconnect`.
 
 Items shared in guild chat appear in Discord as embeds with the in-game tooltip.
 Wynntils shares need Wynntils installed on an observing client; native hover items
-are also supported. If a preview cannot be rendered, the message still arrives
+are also supported without it. New-stat support follows that client's Wynntils
+version. If a preview cannot be rendered, the message still arrives
 with a readable item label. Only the tooltip is rendered—never your screen.
 
 ## Updates

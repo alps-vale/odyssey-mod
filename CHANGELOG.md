@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Show shared items in Discord with their in-game tooltip, colours, and item frame.
+- Use Wynntils' decoder when installed; native hover items work without it.
+- Keep chat readable when an item preview is unavailable.
+
 ## 0.2.3
 
 - Connect through any `*.wynncraft.com` address, including lobby and regional hosts.

@@ -4,7 +4,6 @@ import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.HoverEvent
-import net.minecraft.network.chat.contents.PlainTextContents
 import net.minecraft.world.item.ItemStack
 import org.odyssey.mod.OdysseyDiagnostics
 import org.odyssey.mod.network.ItemShare
@@ -55,12 +54,17 @@ internal object ItemSharing {
 
     private fun collectNative(component: Component, content: String, items: MutableMap<String, SharedStack>) {
         val hover = component.style.hoverEvent as? HoverEvent.ShowItem
-        val reference = (component.contents as? PlainTextContents)?.text()?.trim()
+        // Hover styles apply to the complete subtree, including empty wrapper literals.
+        val reference = component.string.trim()
         if (hover != null && !reference.isNullOrEmpty() && reference in content && items.size < MAX_ITEM_SHARES) {
+            if (items.values.any { it.kind == ItemShareKind.WYNNTILS && it.encoded == reference }) return
             val stack = hover.item.copy()
             val name = stack.hoverName.string
             if (name.isNotEmpty() && name.codePointCount(0, name.length) <= 128 && !name.any(Char::isISOControl)) {
-                items.putIfAbsent(reference, SharedStack(reference, name, ItemShareKind.WYNNCRAFT, stack))
+                if (items.values.none { it.encoded == reference && ItemStack.isSameItemSameComponents(it.stack, stack) }) {
+                    items["native-${items.size}"] = SharedStack(reference, name, ItemShareKind.WYNNCRAFT, stack)
+                }
+                return
             }
         }
         component.siblings.forEach { collectNative(it, content, items) }

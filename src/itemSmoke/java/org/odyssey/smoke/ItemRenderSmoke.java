@@ -60,21 +60,35 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     Component.literal("-10% Health Regen").withStyle(ChatFormatting.RED),
                     Component.literal("Legendary Item").withStyle(ChatFormatting.AQUA))));
                 String reference = "[Tooltip fixture]";
-                Component body = Component.literal(reference).withStyle(style -> style.withHoverEvent(new HoverEvent.ShowItem(stack)));
-                String content = encoded == null ? reference : encoded + " " + reference;
-                int expected = encoded == null ? 1 : 2;
+                Component body = Component.empty().withStyle(style -> style.withHoverEvent(new HoverEvent.ShowItem(stack))).append(Component.literal(reference));
+                ItemStack variant = stack.copy();
+                variant.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("Different roll fixture").withStyle(ChatFormatting.GREEN))));
+                Component second = Component.literal(reference).withStyle(style -> style.withHoverEvent(new HoverEvent.ShowItem(variant)));
+                String content = (encoded == null ? "" : encoded + " ") + reference + " " + reference;
+                int expected = encoded == null ? 2 : 3;
                 Class<?> capture = Class.forName("org.odyssey.mod.item.ItemSharing");
                 Method method = capture.getMethod("capture", List.class, String.class, Function1.class);
+                // An unsupported wire version must not interrupt ordinary chat/capture.
+                String unsupported = new String(Character.toChars(0xf0063));
+                if (encoded != null) unsupported += encoded.substring(Character.charCount(encoded.codePointAt(0)));
+                Function1<List<?>, Unit> fallback = shares -> {
+                    if (!shares.isEmpty()) throw new IllegalStateException("Unsupported item version must use text fallback");
+                    System.out.println("[Odyssey Item Smoke] Unsupported encoding fallback PASS");
+                    return Unit.INSTANCE;
+                };
+                method.invoke(capture.getField("INSTANCE").get(null), List.of(), unsupported, fallback);
                 Function1<List<?>, Unit> complete = shares -> {
                     try {
                         if (shares.size() != expected) throw new IllegalStateException("Wrong number of captured shares: " + shares.size());
                         Path output = Path.of(destination);
                         Files.createDirectories(output.getParent());
+                        int nativeIndex = 0;
                         for (Object share : shares) {
                             String png = (String) share.getClass().getMethod("getPng").invoke(share);
                             if (png == null) throw new IllegalStateException("Tooltip render timed out or exceeded bounds");
                             String kind = share.getClass().getMethod("getKind").invoke(share).toString();
-                            Path file = kind.equals("WYNNTILS") ? output.resolveSibling("tooltip-wynntils.png") : output;
+                            Path file = kind.equals("WYNNTILS") ? output.resolveSibling("tooltip-wynntils.png") :
+                                (nativeIndex++ == 0 ? output : output.resolveSibling("tooltip-native-variant.png"));
                             Files.write(file, Base64.getDecoder().decode(png));
                             System.out.println("[Odyssey Item Smoke] " + kind + " tooltip PNG PASS");
                         }
@@ -87,7 +101,7 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     }
                     return Unit.INSTANCE;
                 };
-                method.invoke(capture.getField("INSTANCE").get(null), List.of(body), content, complete);
+                method.invoke(capture.getField("INSTANCE").get(null), List.of(body, second), content, complete);
             } catch (Exception failure) {
                 failure.printStackTrace();
                 System.out.println("[Odyssey Item Smoke] FAIL");
