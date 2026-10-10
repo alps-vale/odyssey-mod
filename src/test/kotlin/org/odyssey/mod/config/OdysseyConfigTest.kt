@@ -1,6 +1,7 @@
 package org.odyssey.mod.config
 
 import org.odyssey.mod.OdysseyDiagnostics
+import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -26,7 +27,7 @@ class OdysseyConfigTest {
         val config = OdysseyConfig.load(path)
 
         assertEquals(OdysseyConfig(), config)
-        assertEquals("{}", Files.readString(path).trim())
+        assertEquals(config, Json.decodeFromString<OdysseyConfig>(Files.readString(path)))
         assertEquals(config, OdysseyConfig.load(path))
     }
 

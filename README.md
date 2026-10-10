@@ -36,8 +36,8 @@ Restart Minecraft after changing these settings.
 
 Odyssey checks for stable releases in the background, at most once a day.
 Click **Update** in the chat notice to download an update; it installs after
-Minecraft closes. Automatic installation is off by default. Enable it with
-`/odyssey update auto on` if you want future updates installed without asking.
+Minecraft closes. Automatic updates are on by default. Use
+`/odyssey update auto off` to disable them; your choice is saved across restarts.
 
 The updater works on Windows, Linux, and macOS. It checks the release signature,
 the JAR, and your instance's dependencies before changing anything. It only
@@ -63,11 +63,11 @@ mise run ci
 ```
 
 `mise run build` creates `build/libs/odyssey-mod.jar`.
-CI checks the build and installer on Linux, Windows, and macOS (Apple Silicon
-and Intel). It caches tools and Gradle state per platform, cancels superseded
-checks, and runs workflow/release-helper checks once on Linux. Only `main`
-updates shared caches; PRs and releases read them. These commands do not install
-or launch Minecraft.
+CI builds and tests the mod once on Linux. Windows and macOS (Apple Silicon
+and Intel) run the same compiled updater checks without rebuilding Minecraft.
+It caches tools and Gradle state, cancels superseded checks, and promotes the
+tested Linux JAR. Only `main` updates shared caches; PRs and releases read them.
+These commands do not install or launch Minecraft.
 
 ## Releases
 

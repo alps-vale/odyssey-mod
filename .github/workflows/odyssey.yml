@@ -21,11 +21,8 @@ concurrency:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, windows-2025, macos-15, macos-15-intel]
-    runs-on: ${{ matrix.runner }}
+    name: build (ubuntu-24.04)
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -40,11 +37,11 @@ jobs:
         # zizmor: ignore[cache-poisoning] -- Only main saves; GitHub scopes PR caches away from main/releases.
         with:
           version: 2026.10.3
-          install_args: ${{ runner.os == 'Linux' && '--locked' || '--locked java python' }}
+          install_args: --locked
           cache: true
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           # The publisher reads the same Linux tool cache, installing only Java/Python.
-          cache_key: "odyssey-mise-v2-{{version}}-{{platform}}-{{file_hash}}"
+          cache_key: "odyssey-mise-v3-{{version}}-{{platform}}-${{ hashFiles('mise.lock') }}"
           github_token: ""
 
       # Gradle actions v6.4.0; action.yml runs on node24. Only main writes reusable state.
@@ -69,12 +66,16 @@ jobs:
         env:
           ODYSSEY_VERSION: ${{ steps.release.outputs.version }}
         shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            mise run ci
-          else
-            mise run build
-          fi
+        run: mise run ci
+
+      - name: Retain compiled native updater checks
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-updater-tests
+          path: build/native-tests/native-updater-tests.zip
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
 
       - name: Retain native updater test results
         if: always()
@@ -97,12 +98,11 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version "$RELEASE_VERSION" --metadata build/libs/release-artifact.json --source-sha "$SHA"
           else
-            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.2.0-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
+            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.2.1-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
           fi
 
       # actions/upload-artifact v7.0.2; action.yml runs on node24.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: runner.os == 'Linux'
         with:
           name: odyssey-remapped-jar
           path: |
@@ -111,9 +111,49 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  native:
+    name: updater (${{ matrix.runner }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        # zizmor: ignore[cache-poisoning] -- Only main saves; PR/tag jobs consume trusted defaults.
+        with:
+          version: 2026.10.3
+          install_args: --locked java python
+          cache: true
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache_key: "odyssey-mise-v3-{{version}}-{{platform}}-${{ hashFiles('mise.lock') }}"
+          github_token: ""
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-updater-tests
+          path: build/native-tests
+
+      - name: Run native updater checks without rebuilding Minecraft
+        run: mise run test-native
+
+      - name: Retain native updater test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: updater-tests-${{ runner.os }}-${{ runner.arch }}
+          path: build/test-results/native/*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, native]
     runs-on: ubuntu-24.04
     concurrency:
       group: odyssey-release-${{ github.ref }}
@@ -125,6 +165,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       # jdx/mise-action v5.1.1; action.yml runs on node24.
@@ -135,7 +176,7 @@ jobs:
           install_args: --locked java python
           cache: true
           cache_save: false
-          cache_key: "odyssey-mise-v2-{{version}}-{{platform}}-{{file_hash}}"
+          cache_key: "odyssey-mise-v3-{{version}}-{{platform}}-${{ hashFiles('mise.lock') }}"
           github_token: ""
 
       # actions/download-artifact v8.0.1; action.yml runs on node24.

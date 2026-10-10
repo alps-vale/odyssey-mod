@@ -1,7 +1,8 @@
 package org.odyssey.mod.mixin
 
 import net.minecraft.client.GuiMessage
-import net.minecraft.client.gui.Font
+import com.llamalad7.mixinextras.sugar.Local
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.components.ChatComponent
 import net.minecraft.network.chat.Component
 import net.minecraft.util.FormattedCharSequence
@@ -12,7 +13,6 @@ import org.odyssey.mod.chat.GuildChatDecorator
 import org.spongepowered.asm.mixin.Mixin
 import org.spongepowered.asm.mixin.injection.At
 import org.spongepowered.asm.mixin.injection.ModifyVariable
-import org.spongepowered.asm.mixin.injection.Redirect
 
 @Mixin(ChatComponent::class)
 abstract class ChatComponentMixin {
@@ -27,20 +27,18 @@ abstract class ChatComponentMixin {
             GuildChatDecorator.decorate(component)
         }
 
-    @Redirect(
+    // Transform the stored result so other mods can still redirect the wrapping call.
+    @ModifyVariable(
         method = ["addMessageToDisplayQueue"],
-        at = At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/GuiMessage;splitLines(Lnet/minecraft/client/gui/Font;I)Ljava/util/List;",
-        ),
+        at = At("STORE"),
+        ordinal = 0,
     )
     private fun `odyssey$wrapBridgeContinuations`(
+        initialLines: List<FormattedCharSequence>,
         message: GuiMessage,
-        font: Font,
-        maxWidth: Int,
+        @Local(ordinal = 0) maxWidth: Int,
     ): List<FormattedCharSequence> = OdysseyDiagnostics.callback("bridge continuation wrapping") {
-        val initialLines = message.splitLines(font, maxWidth)
         val prefix = BridgeChatRenderer.continuationPrefix(message.content()) ?: return@callback initialLines
-        ChatBridgeLineWrapping.wrap(initialLines, message, font, maxWidth, prefix)
+        ChatBridgeLineWrapping.wrap(initialLines, message, Minecraft.getInstance().font, maxWidth, prefix)
     }
 }

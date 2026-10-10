@@ -1,6 +1,7 @@
 import net.fabricmc.loom.task.RemapJarTask
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.api.tasks.bundling.Jar
+import org.gradle.api.tasks.bundling.Zip
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -12,7 +13,7 @@ plugins {
 group = "org.odyssey"
 version = providers.gradleProperty("mod_version")
     .orElse(providers.environmentVariable("ODYSSEY_VERSION"))
-    .orElse("0.2.0-SNAPSHOT")
+    .orElse("0.2.1-SNAPSHOT")
     .get()
 
 val backendUrl = providers.gradleProperty("backend_url").orNull
@@ -27,6 +28,9 @@ repositories {
     mavenCentral()
 }
 
+// Only the updater's portable runtime, not Minecraft or the Kotlin compiler.
+val nativeTestRuntime by configurations.creating
+
 dependencies {
     minecraft("com.mojang:minecraft:1.21.11")
     mappings(loom.officialMojangMappings())
@@ -38,6 +42,19 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.13.4")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+
+    nativeTestRuntime("org.junit.platform:junit-platform-console-standalone:1.13.4")
+    nativeTestRuntime("org.jetbrains.kotlin:kotlin-test-junit5:2.4.10") {
+        exclude(group = "org.junit.jupiter")
+        exclude(group = "org.junit.platform")
+    }
+    nativeTestRuntime("net.fabricmc:fabric-loader:0.19.3")
+    // Fabric Loader's installer metadata supplies these; its Maven POM does not.
+    listOf("asm", "asm-analysis", "asm-commons", "asm-tree", "asm-util").forEach {
+        nativeTestRuntime("org.ow2.asm:$it:9.10.1")
+    }
+    nativeTestRuntime("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    nativeTestRuntime("org.slf4j:slf4j-simple:2.0.17")
 }
 
 java {
@@ -92,6 +109,26 @@ tasks.processResources {
 tasks.test {
     dependsOn(updateHelperJar)
     systemProperty("odyssey.helper.jar", updateHelperJar.get().archiveFile.get().asFile.absolutePath)
+}
+
+val nativeTestBundle by tasks.registering(Zip::class) {
+    dependsOn(tasks.testClasses, updateHelperJar)
+    archiveFileName.set("native-updater-tests.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("native-tests"))
+    from(sourceSets.main.get().output) {
+        into("classes")
+        include("org/odyssey/mod/update/**", "org/odyssey/mod/config/OdysseyConfig*",
+            "org/odyssey/mod/OdysseyDiagnostics*", "odyssey-update.pub", "updates/**")
+    }
+    from(sourceSets.test.get().output) {
+        into("classes")
+        include("org/odyssey/mod/update/**")
+    }
+    from(nativeTestRuntime) { into("lib") }
+}
+
+tasks.register("ci") {
+    dependsOn(tasks.build, nativeTestBundle)
 }
 
 val generateBackendConfig by tasks.registering {

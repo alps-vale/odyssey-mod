@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Fix a startup crash when Odyssey and Sequoia are installed together.
+- Enable automatic updates by default; save explicit opt-outs across restarts.
+- Build once in CI while retaining updater checks on Windows, Linux, and macOS.
+
+If Odyssey cannot start, close Minecraft and replace its JAR manually.
+
 ## 0.2.0
 
 - Java 21 support, matching Minecraft 1.21.11's usual launcher runtime.
