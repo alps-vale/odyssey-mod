@@ -30,6 +30,14 @@ In Minecraft:
 If the bridge stays disconnected, check your linked profile and guild role,
 then run `/odyssey reconnect`.
 
+## Shared items
+
+Items shared in guild chat appear in Discord as embeds with the in-game tooltip.
+Wynntils shares need Wynntils installed on an observing client; native hover items
+are also supported without it. New-stat support follows that client's Wynntils
+version. If a preview cannot be rendered, the message still arrives
+with a readable item label. Only the tooltip is rendered—never your screen.
+
 ## Updates
 
 Automatic updates are on by default. Odyssey checks for stable releases at most

@@ -6,6 +6,8 @@ import net.minecraft.SharedConstants
 import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.ComponentSerialization
+import net.minecraft.network.chat.FormattedText
+import net.minecraft.network.chat.Style
 import net.minecraft.server.Bootstrap
 import org.odyssey.mod.network.ChatAuthor
 import org.odyssey.mod.network.ChatSource
@@ -18,8 +20,10 @@ import org.odyssey.mod.network.RankColors
 import org.odyssey.mod.network.RankPresentation
 import org.odyssey.mod.network.ServerMessage
 import java.net.URI
+import java.util.Optional
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
@@ -190,6 +194,80 @@ class GuildChatTest {
     }
 
     @Test
+    fun `rewritten guild headers retain linked rank and rich body without weakening observation parsing`() {
+        val original = fixture("guild_multiline_rich.json")
+        val rewritten = flattenForDisplay(original)
+        val role = RankPresentation("Pathfinder", RankColors(0x112233, 0x445566))
+        PresentationRepository.replace(PresentationSnapshot(1, mapOf(
+            "11111111-1111-4111-8111-111111111111" to PresentationEntry(
+                "11111111-1111-4111-8111-111111111111", "HSPApplicant", role,
+            ),
+        )))
+        assertNull(GuildChatParser.parse(rewritten), "wire observation stays strict")
+        assertSame(rewritten, GuildChatDecorator.decorate(rewritten), "unvalidated display trees fail closed")
+
+        var decorated: Component = rewritten
+        GuildChatDecorator.withGuildMessage(original) { decorated = GuildChatDecorator.decorate(rewritten) }
+        assertNotSame(rewritten, decorated)
+        assertTrue(RankPillFactory.rank(role).string in decorated.string)
+        assertTrue(decorated.string.endsWith(original.siblings.drop(5).joinToString("") { it.string }))
+        var hoverPreserved = false
+        decorated.visit(FormattedText.StyledContentConsumer<Unit> { style, text ->
+            if (text == "[ProfSpeed]") hoverPreserved = style.hoverEvent == original.siblings[5].siblings[0].style.hoverEvent
+            Optional.empty()
+        }, Style.EMPTY)
+        assertTrue(hoverPreserved)
+        assertSame(rewritten, GuildChatDecorator.decorate(rewritten), "header provenance cannot leak to another message")
+    }
+
+    @Test
+    fun `rewritten decoration requires the exact server header and always clears delivery context`() {
+        val original = fixture("guild_ordinary.json")
+        val rewritten = flattenForDisplay(original)
+        PresentationRepository.replace(PresentationSnapshot(1, mapOf(
+            "11111111-1111-4111-8111-111111111111" to PresentationEntry(
+                "11111111-1111-4111-8111-111111111111", "HSPApplicant",
+                RankPresentation("Pathfinder", RankColors(0x112233)),
+            ),
+        )))
+        val unrelated = fixture("party_message.json")
+        GuildChatDecorator.withGuildMessage(original) {
+            assertSame(unrelated, GuildChatDecorator.decorate(unrelated))
+        }
+        assertFailsWith<IllegalStateException> {
+            GuildChatDecorator.withGuildMessage(original) { error("cancelled display") }
+        }
+        assertSame(rewritten, GuildChatDecorator.decorate(rewritten))
+    }
+
+    @Test
+    fun `rewritten nickname keeps canonical identity and hover after nested delivery`() {
+        val original = fixture("guild_nickname.json")
+        val rewritten = flattenForDisplay(original)
+        val role = RankPresentation("Highlander", RankColors(0x7788FF))
+        PresentationRepository.replace(PresentationSnapshot(1, mapOf(
+            "22222222-2222-4222-8222-222222222222" to PresentationEntry(
+                "22222222-2222-4222-8222-222222222222", "Colossal_Rat", role,
+            ),
+        )))
+        GuildChatDecorator.withGuildMessage(original) {
+            GuildChatDecorator.withGuildMessage(fixture("party_message.json")) {
+                assertSame(rewritten, GuildChatDecorator.decorate(rewritten))
+            }
+            val decorated = GuildChatDecorator.decorate(rewritten)
+            assertTrue(RankPillFactory.rank(role).string in decorated.string)
+            val expectedHover = original.siblings[4].siblings[0].style.hoverEvent
+            var visibleName = ""
+            decorated.visit(FormattedText.StyledContentConsumer<Unit> { style, text ->
+                if (style.hoverEvent == expectedHover) visibleName += text
+                Optional.empty()
+            }, Style.EMPTY)
+            assertEquals("Wall of Cheese", visibleName)
+            assertTrue(decorated.string.endsWith(" xD"))
+        }
+    }
+
+    @Test
     fun `rank pills use Wynn labels smooth gradients and compact source markers`() {
         val pill = RankPillFactory.rank(RankPresentation("Ab 1", RankColors(0xFFFFFF)))
         assertEquals(
@@ -264,6 +342,15 @@ class GuildChatTest {
                 "\uF8FD\uF8FD\uF8FD\uF8FD\uF8FD\uF8FD\uF8FD\uF8FD\uF8FD\uF8FD",
             RankPillFactory.discordSource(continuation = true).string,
         )
+    }
+
+    private fun flattenForDisplay(original: Component): Component {
+        val result = Component.empty()
+        original.visit(FormattedText.StyledContentConsumer<Unit> { style, text ->
+            if (text.isNotEmpty()) result.append(Component.literal(text).withStyle(style))
+            Optional.empty()
+        }, Style.EMPTY)
+        return result
     }
 
     private fun fixture(name: String): Component {

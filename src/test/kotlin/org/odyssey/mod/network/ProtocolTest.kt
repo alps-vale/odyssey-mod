@@ -11,6 +11,7 @@ class ProtocolTest {
     private val clientFixtures = listOf(
         "client_observer_state.json",
         "client_guild_observation.json",
+        "client_guild_observation_item.json",
     )
     private val serverFixtures = listOf(
         "server_welcome.json",
@@ -33,6 +34,31 @@ class ProtocolTest {
         }
         assertIs<ClientMessage.ObserverState>(messages[0])
         assertIs<ClientMessage.GuildObservation>(messages[1])
+    }
+
+    @Test
+    fun `item previews permit bounded image frames without relaxing server frames`() {
+        val reference = String(Character.toChars(0xf0001))
+        val share = ItemShare(ItemShareKind.WYNNTILS, reference, "Test item", 0xaa00aa, "A".repeat(20_000))
+        val message = ClientMessage.GuildObservation(2, "22222222-2222-4222-8222-222222222222", "Alice", reference, listOf(share))
+        val text = ProtocolCodec.encode(message)
+        assertEquals(message, ProtocolCodec.decodeClient(ProtocolFrame.Text(text)))
+        assertFails { ProtocolCodec.encode(message.copy(content = "unrelated")) }
+        assertFails { ProtocolCodec.encode(message.copy(itemShares = List(4) { share })) }
+        assertFails { ProtocolCodec.encode(message.copy(itemShares = listOf(share, share))) }
+        assertFails { ProtocolCodec.encode(message.copy(itemShares = listOf(share.copy(png = "A".repeat(90_000))))) }
+        assertFails { ProtocolCodec.decodeServer(ProtocolFrame.Text(text)) }
+    }
+
+    @Test
+    fun `same labelled native items require distinct nonoverlapping references`() {
+        val first = ItemShare(ItemShareKind.WYNNCRAFT, "[Bow]", "Bow", 0xaa00aa)
+        val second = first.copy(png = "AAAA")
+        val message = ClientMessage.GuildObservation(2, "22222222-2222-4222-8222-222222222222", "Alice", "[Bow] [Bow]", listOf(first, second))
+        assertEquals(message, ProtocolCodec.decodeClient(ProtocolFrame.Text(ProtocolCodec.encode(message))))
+        assertFails { ProtocolCodec.encode(message.copy(content = "[Bow]")) }
+        assertFails { ProtocolCodec.encode(message.copy(content = "aaa", itemShares = listOf(first.copy(encoded = "aa"), second.copy(encoded = "aa")))) }
+        assertFails { ProtocolCodec.encode(message.copy(itemShares = listOf(first.copy(encoded = "")))) }
     }
 
     @Test

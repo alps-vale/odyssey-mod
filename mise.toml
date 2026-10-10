@@ -11,7 +11,7 @@ zizmor = "1.30.1"
 [env]
 ODYSSEY_ANNOUNCEMENTS_URL = { default = "https://odyssey.notes.supply/api/v1/automations/releases/messages" }
 ODYSSEY_BACKEND_URL = { default = "https://odyssey.notes.supply" }
-ODYSSEY_VERSION = { default = "0.2.3-SNAPSHOT" }
+ODYSSEY_VERSION = { default = "0.3.0-SNAPSHOT" }
 ODYSSEY_DEVELOPMENT = { default = "false" }
 ODYSSEY_PRISM_INSTANCE = { default = "odyssey-testing" }
 PRISM_ROOT = { default = """\
@@ -31,6 +31,11 @@ run = ["actionlint .github/workflows/odyssey.yml", "zizmor .github/workflows/ody
 description = "Run Odyssey unit tests"
 run = "./gradlew test"
 run_windows = "cmd.exe /d /c gradlew.bat test"
+
+[tasks.test-item-render]
+description = "Render an isolated tooltip in the real Minecraft client and exit (requires a display)"
+run = "./gradlew runItemSmoke"
+run_windows = "cmd.exe /d /c gradlew.bat runItemSmoke"
 
 [tasks.test-release]
 description = "Test the version/artifact/Discord release helpers without sending a message"

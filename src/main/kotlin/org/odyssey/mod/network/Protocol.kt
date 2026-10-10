@@ -7,6 +7,9 @@ import java.util.UUID
 
 internal const val PROTOCOL_VERSION = 2
 internal const val MAX_FRAME_BYTES = 8 * 1024
+internal const val MAX_CLIENT_FRAME_BYTES = 320 * 1024
+internal const val MAX_ITEM_SHARES = 3
+internal const val MAX_TOOLTIP_PNG_BYTES = 64 * 1024
 internal const val MAX_GUILD_BODY_CODE_POINTS = 400
 internal const val MAX_DISCORD_BODY_CODE_POINTS = 2_000
 internal const val MAX_DISCORD_LINES = 8
@@ -34,8 +37,24 @@ internal sealed interface ClientMessage {
         val id: String,
         @SerialName("author_username") val authorUsername: String,
         val content: String,
+        @SerialName("item_shares") val itemShares: List<ItemShare> = emptyList(),
     ) : ClientMessage
 }
+
+@Serializable
+internal enum class ItemShareKind {
+    @SerialName("wynntils") WYNNTILS,
+    @SerialName("wynncraft") WYNNCRAFT,
+}
+
+@Serializable
+internal data class ItemShare(
+    val kind: ItemShareKind,
+    val encoded: String,
+    val name: String,
+    val color: Int,
+    val png: String? = null,
+)
 
 @Serializable
 internal sealed interface ServerMessage {
@@ -161,14 +180,14 @@ internal sealed interface ProtocolFrame {
 internal object ProtocolCodec {
     private val json = Json {
         classDiscriminator = "type"
-        encodeDefaults = true
+        encodeDefaults = false
         explicitNulls = false
         ignoreUnknownKeys = false
     }
 
     fun decodeClient(frame: ProtocolFrame): ClientMessage {
         require(frame is ProtocolFrame.Text) { "Binary WebSocket frames are not supported" }
-        requireFrameSize(frame.text)
+        requireFrameSize(frame.text, MAX_CLIENT_FRAME_BYTES)
         return json.decodeFromString<ClientMessage>(frame.text).also(::validate)
     }
 
@@ -180,7 +199,7 @@ internal object ProtocolCodec {
 
     fun encode(message: ClientMessage): String {
         validate(message)
-        return json.encodeToString(ClientMessage.serializer(), message).also(::requireFrameSize)
+        return json.encodeToString(ClientMessage.serializer(), message).also { requireFrameSize(it, MAX_CLIENT_FRAME_BYTES) }
     }
 
     fun encode(message: ServerMessage): String {
@@ -202,6 +221,20 @@ internal object ProtocolCodec {
                         message.content.codePointLength() <= MAX_GUILD_BODY_CODE_POINTS &&
                         '\n' !in message.content && '\r' !in message.content,
                 ) { "Invalid guild-chat body" }
+                require(message.itemShares.size <= MAX_ITEM_SHARES) { "Too many item shares" }
+                message.itemShares.forEachIndexed { index, share ->
+                    if (share.kind == ItemShareKind.WYNNTILS) {
+                        require(message.itemShares.take(index).none { it.encoded == share.encoded })
+                    } else {
+                        require(message.itemShares.count { it.encoded == share.encoded } <=
+                            countOccurrences(message.content, share.encoded))
+                    }
+                }
+                message.itemShares.forEach {
+                    require(it.encoded.isNotEmpty() && it.encoded in message.content)
+                    require(isSafeRemoteText(it.name, 128) && it.color in 0..MAX_RGB)
+                    require(it.png == null || it.png.length <= (MAX_TOOLTIP_PNG_BYTES + 2) / 3 * 4)
+                }
             }
         }
     }
@@ -315,8 +348,20 @@ internal object ProtocolCodec {
         require(version == PROTOCOL_VERSION) { "Unsupported protocol version $version" }
     }
 
-    private fun requireFrameSize(text: String) {
-        require(text.toByteArray(Charsets.UTF_8).size <= MAX_FRAME_BYTES) { "WebSocket frame exceeds 8 KiB" }
+    private fun requireFrameSize(text: String, limit: Int = MAX_FRAME_BYTES) {
+        require(text.toByteArray(Charsets.UTF_8).size <= limit) { "WebSocket frame exceeds its size limit" }
+    }
+
+    private fun countOccurrences(content: String, reference: String): Int {
+        if (reference.isEmpty()) return 0
+        var count = 0
+        var offset = 0
+        while (true) {
+            val next = content.indexOf(reference, offset)
+            if (next < 0) return count
+            count += 1
+            offset = next + reference.length
+        }
     }
 
     private fun requireUuid(value: String) {
