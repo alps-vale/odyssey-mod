@@ -79,7 +79,7 @@ class ReleaseValidationTests(unittest.TestCase):
         release.verify_payload(payload)
         self.assertEqual(payload["allowed_mentions"], {"parse": [], "users": [], "roles": []})
         self.assertEqual(payload["username"], "Wayfinder")
-        self.assertEqual(payload["avatar_url"], release.WAYFINDER_AVATAR)
+        self.assertNotIn("avatar_url", payload)  # Use the verified webhook default.
         self.assertEqual(payload["flags"], release.COMPONENTS_V2)
         card = payload["components"][0]["components"]
         self.assertLessEqual(sum(len(c["content"]) for c in card if c["type"] == 10), 4000)
@@ -100,7 +100,9 @@ class ReleaseValidationTests(unittest.TestCase):
         message = release.discord_payload("v1.2.3", "Changes", url, jar_url)
         message.update({"channel_id": release.CHANNEL_ID, "mention_everyone": False,
                         "mentions": [], "mention_roles": [],
-                        "author": {"username": "Wayfinder", "avatar": "verified-avatar"}})
+                        "webhook_id": release.WEBHOOK_ID,
+                        "author": {"id": release.WEBHOOK_ID, "username": "Wayfinder",
+                                   "avatar": release.WAYFINDER_AVATAR}})
         message["attachments"][0]["url"] = "https://cdn.discordapp.com/fixture.jar"
         # Discord adds IDs and resolves attachment:// to the uploaded file's CDN URL.
         message["components"][0]["id"] = 1
@@ -122,7 +124,14 @@ class ReleaseValidationTests(unittest.TestCase):
             wrong_sender["author"]["username"] = "Wrong bot"
             missing_avatar = deepcopy(message)
             missing_avatar["author"]["avatar"] = None
-            for invalid in (wrong_order, extra_file, wrong_sender, missing_avatar):
+            wrong_avatar = deepcopy(message)
+            wrong_avatar["author"]["avatar"] = "another-nonempty-avatar"
+            wrong_author = deepcopy(message)
+            wrong_author["author"]["id"] = "another-webhook"
+            wrong_webhook = deepcopy(message)
+            wrong_webhook["webhook_id"] = "another-webhook"
+            for invalid in (wrong_order, extra_file, wrong_sender, missing_avatar,
+                            wrong_avatar, wrong_author, wrong_webhook):
                 with self.assertRaises(release.ReleaseError): verify(invalid)
         with patch.object(release, "_download", return_value=b"different jar"):
             with self.assertRaises(release.ReleaseError): verify(message)
@@ -141,12 +150,15 @@ class ReleaseValidationTests(unittest.TestCase):
     def test_webhook_must_be_bound_to_the_expected_release_channel(self) -> None:
         original = release._request_json
         try:
-            release._request_json = lambda _url: {"channel_id": release.CHANNEL_ID}
+            correct = {"id": release.WEBHOOK_ID, "channel_id": release.CHANNEL_ID,
+                       "name": release.WAYFINDER_NAME, "avatar": release.WAYFINDER_AVATAR}
+            release._request_json = lambda _url: correct
             self.assertEqual(release._webhook_channel("https://discord.com/api/webhooks/id/token"),
                              release.CHANNEL_ID)
-            release._request_json = lambda _url: {"channel_id": "wrong"}
-            with self.assertRaises(release.ReleaseError):
-                release._webhook_channel("https://discord.com/api/webhooks/id/token")
+            for field in correct:
+                release._request_json = lambda _url, field=field: {**correct, field: "wrong"}
+                with self.subTest(field=field), self.assertRaises(release.ReleaseError):
+                    release._webhook_channel("https://discord.com/api/webhooks/id/token")
         finally:
             release._request_json = original
 

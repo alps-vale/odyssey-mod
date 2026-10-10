@@ -30,12 +30,11 @@ ENTRYPOINT_CLASS = "org/odyssey/mod/OdysseyMod.class"
 RECEIPT_NAME = "discord-announcement.json"
 JAR_NAME = "odyssey-mod.jar"
 CHANNEL_ID = "1558187887579627600"
-# Verified against the live Odyssey backend's Discord bot, not a separate release identity.
+# This webhook's default icon was verified against the live Wayfinder bot.
+# Use that default: avatar_url copies are not guaranteed to retain the source hash.
+WEBHOOK_ID = "1558190741342392384"
 WAYFINDER_NAME = "Wayfinder"
-WAYFINDER_AVATAR = (
-    "https://cdn.discordapp.com/avatars/1533129281956347925/"
-    "a_488f6d48c534b12dfe5c36c87bd40a70.gif?size=1024"
-)
+WAYFINDER_AVATAR = "2437cfee93d78e6b0d3438c4022331e5"
 COMPONENTS_V2 = 1 << 15
 RUNTIME_REQUIREMENTS = (
     "Minecraft 1.21.11 · Java 21+ · Fabric Loader 0.19.3+ · "
@@ -119,7 +118,6 @@ def discord_payload(tag: str, body: str, release_url: str, jar_url: str) -> dict
         description = description[:description_limit].rstrip() + "…" + suffix
     return {
         "username": WAYFINDER_NAME,
-        "avatar_url": WAYFINDER_AVATAR,
         "flags": COMPONENTS_V2,
         "allowed_mentions": {"parse": [], "users": [], "roles": []},
         "components": [
@@ -205,6 +203,9 @@ def _webhook_channel(webhook_url: str) -> str:
     channel_id = metadata.get("channel_id")
     if channel_id != CHANNEL_ID:
         raise ReleaseError("Configured Discord webhook does not belong to the expected release channel.")
+    if (metadata.get("id") != WEBHOOK_ID or metadata.get("name") != WAYFINDER_NAME
+            or metadata.get("avatar") != WAYFINDER_AVATAR):
+        raise ReleaseError("Configured release webhook does not have the verified Wayfinder identity.")
     return channel_id
 
 
@@ -238,8 +239,10 @@ def verify_message(message: dict[str, Any], *, expected_jar: bytes,
     author = message.get("author", {})
     if author.get("username") != expected_username:
         raise ReleaseError("Discord announcement did not use the expected sender name.")
-    if expected_username == WAYFINDER_NAME and not author.get("avatar"):
-        raise ReleaseError("Discord announcement did not use Wayfinder's avatar.")
+    if expected_username == WAYFINDER_NAME and (
+            author.get("avatar") != WAYFINDER_AVATAR or author.get("id") != WEBHOOK_ID
+            or message.get("webhook_id") != WEBHOOK_ID):
+        raise ReleaseError("Discord announcement did not use the verified Wayfinder webhook and avatar.")
     if message.get("channel_id") != CHANNEL_ID:
         raise ReleaseError("Discord readback message is not in the configured release channel.")
     if message.get("mention_everyone") is not False or message.get("mentions") or message.get("mention_roles"):

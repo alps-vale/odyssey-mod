@@ -184,9 +184,9 @@ jobs:
           elif [[ "$TAG" == v0.1.0 ]]; then
             gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-file CHANGELOG.md
           elif [[ "$TAG" == *-* ]]; then
-            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --title "Odyssey $TAG" --generate-notes --prerelease --latest=false
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --title "Odyssey $TAG" --notes-from-tag --prerelease --latest=false
           else
-            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --generate-notes
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-from-tag
           fi
 
       - name: Announce release to Discord and verify readback

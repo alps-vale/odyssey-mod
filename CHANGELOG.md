@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Java 21 support, matching Minecraft 1.21.11's usual launcher runtime.
 - Background update checks with the usual Odyssey chat styling.
@@ -8,6 +8,9 @@
 - Opt-in automatic updates and a retained copy of the previous version.
 - Update commands in the setup guide.
 - Wayfinder release announcements with the changelog first, a version download link, and just the JAR attached.
+
+Replace your old Odyssey JAR once to gain the updater. Automatic installation is
+off by default; enable it with `/odyssey update auto on`.
 
 ## 0.1.0
 

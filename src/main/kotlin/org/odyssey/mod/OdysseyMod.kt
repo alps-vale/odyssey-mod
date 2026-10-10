@@ -36,9 +36,9 @@ object OdysseyMod : ClientModInitializer {
             .version
             .friendlyString
         val config = OdysseyConfig.load()
-        updater = OdysseyUpdater(version, config) { notice ->
+        updater = OdysseyUpdater(version, config, notify = { notice ->
             Minecraft.getInstance().execute { updateNotices.addLast(notice) }
-        }
+        })
         updater.start()
         GuildChatDecorator.enabled = config.discordRankOverrides
         bridge = BridgeClient(

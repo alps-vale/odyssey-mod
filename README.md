@@ -71,8 +71,9 @@ or launch Minecraft.
 
 ## Releases
 
-Push a tag such as `v0.1.0` from `main`. After CI passes, the workflow creates a
-GitHub release and posts its changelog and runnable JAR to Discord as Wayfinder.
+Update the changelog, then push an annotated tag such as `v0.2.0` from `main`,
+using that version's changelog as its tag message. After CI passes, the workflow
+creates a GitHub release and posts its changelog and runnable JAR to Discord as Wayfinder.
 The announcement includes a direct download link for that version.
 Set `DISCORD_RELEASE_WEBHOOK_URL` in the repository's Actions secrets.
 Stable releases also include `update.manifest` and its Ed25519 signature.

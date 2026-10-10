@@ -7,8 +7,7 @@ import org.odyssey.mod.config.OdysseyConfig
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.Duration
-import java.time.Instant
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -16,19 +15,20 @@ internal data class UpdateNotice(val text: String, val action: Action? = null, v
     enum class Action { INSTALL, RELEASES }
 }
 
-/** All network/disk work runs off the game thread; notices are delivered by the caller. */
+/** Release work runs off the game thread; explicit preferences are persisted immediately. */
 internal class OdysseyUpdater(
     private val version: String,
     private var config: OdysseyConfig,
     private val notify: (UpdateNotice) -> Unit,
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "Odyssey updates").apply { isDaemon = true }
+    },
+    private val saveConfig: (OdysseyConfig) -> Unit = OdysseyConfig::save,
 ) {
     private val loader = FabricLoader.getInstance()
     private val target = installedJar()
-    private val cache = loader.configDir.resolve("odyssey-updates")
+    private val cache by lazy { UpdateCache(loader.configDir.resolve("odyssey-updates")) }
     private val transport = UpdateTransport()
-    private val worker = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "Odyssey updates").apply { isDaemon = true }
-    }
     private val queued = AtomicInteger()
     private var candidate: Candidate? = null
     private var rollbackPaused = false
@@ -78,19 +78,27 @@ internal class OdysseyUpdater(
     }
 
     fun setAutomatic(enabled: Boolean) {
-        // Honour an opt-out immediately, including while a release check is fetching metadata.
+        // Cancel in-flight automatic work before saving; a daemon cannot defer this preference.
+        if (!enabled) automatic = false
+        val next = config.copy(autoUpdate = enabled)
+        try { saveConfig(next) }
+        catch (error: Exception) {
+            OdysseyDiagnostics.logger.warn("[Odyssey Mod] Could not save update preference", error)
+            notify(UpdateNotice(if (enabled) "Couldn't save the update setting. Try again."
+                else "Automatic updates are disabled for this session, but the setting couldn't be saved. Try again.",
+                warning = true))
+            return
+        }
+        config = next
         automatic = enabled
+        notify(UpdateNotice(if (enabled) "Automatic updates enabled. Updates install when Minecraft closes."
+            else "Automatic updates disabled."))
+        if (!enabled) return
         submit(true, queue = true) {
-            // Persist settings/rollback acknowledgement in order; never drop an opt-out as busy.
-            if (enabled) {
-                target?.let(UpdateApplier::acknowledgeRollback)
-                rollbackPaused = false
-            }
-            config = config.copy(autoUpdate = enabled)
-            OdysseyConfig.save(config)
-            notify(UpdateNotice(if (enabled) "Automatic updates enabled. Updates install when Minecraft closes."
-                else "Automatic updates disabled."))
-            if (enabled && automatic) checkRelease(true)
+            if (!automatic) return@submit
+            target?.let(UpdateApplier::acknowledgeRollback)
+            rollbackPaused = false
+            checkRelease(true)
         }
     }
 
@@ -99,31 +107,14 @@ internal class OdysseyUpdater(
             if (manual) notify(UpdateNotice(status))
             return
         }
-        Files.createDirectories(cache)
-        val stamp = cache.resolve("checked.txt")
-        val recent = runCatching {
-            val age = Duration.between(Instant.parse(Files.readString(stamp)), Instant.now())
-            !age.isNegative && age < Duration.ofHours(24)
-        }.getOrDefault(false)
-        val manifestPath = cache.resolve("update.manifest")
-        val signaturePath = cache.resolve("update.manifest.sig")
-        val bytes: ByteArray
-        val signature: ByteArray
-        if (!manual && recent && Files.exists(manifestPath) && Files.exists(signaturePath)) {
-            bytes = UpdateManifest.readLimited(manifestPath, UpdateManifest.MAX_MANIFEST)
-            signature = UpdateManifest.readLimited(signaturePath, 64)
-        } else {
-            // Remember failed attempts too. A manual check always bypasses the cache.
-            if (!manual && recent) return
-            UpdateApplier.atomicWrite(stamp, Instant.now().toString().toByteArray())
-            val latest = UpdateManifest.RELEASES + "latest/download/"
-            bytes = transport.bytes(URI.create(latest + "update.manifest"), UpdateManifest.MAX_MANIFEST)
-            signature = transport.bytes(URI.create(latest + "update.manifest.sig"), 64)
-        }
-        val manifest = UpdateManifest.verify(bytes, signature, UpdateManifest.releaseKey())
-        UpdateApplier.atomicWrite(manifestPath, bytes)
-        UpdateApplier.atomicWrite(signaturePath, signature)
         candidate = null
+        val (bytes, signature) = cache.read(manual) {
+            val latest = UpdateManifest.RELEASES + "latest/download/"
+            transport.bytes(URI.create(latest + "update.manifest"), UpdateManifest.MAX_MANIFEST) to
+                transport.bytes(URI.create(latest + "update.manifest.sig"), 64)
+        } ?: return
+        val manifest = UpdateManifest.verify(bytes, signature, UpdateManifest.releaseKey())
+        cache.save(bytes, signature)
         if (!UpdateCompatibility.newer(manifest.version(), version)) {
             status = "Odyssey is up to date."
             if (manual) notify(UpdateNotice(status))
