@@ -2,7 +2,7 @@
 
 ## 0.2.3
 
-- Connect when joining through `lobby.wynncraft.com`, including manual reconnects.
+- Connect through any `*.wynncraft.com` address, including lobby and regional hosts.
 
 ## 0.2.2
 

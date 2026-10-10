@@ -12,7 +12,8 @@ Fabric API 0.141.6+1.21.11, and Fabric Language Kotlin 1.13.13+kotlin.2.4.10.
    Keep only one Odyssey JAR installed.
 3. Link your Minecraft profile with Wayfinder's `/link` command in Discord.
    You need an eligible Alps or Vale guild role.
-4. Join Wynncraft through `play.wynncraft.com` or `lobby.wynncraft.com`.
+4. Join Wynncraft through any `*.wynncraft.com` address, such as `play.wynncraft.com`
+   or `lobby.wynncraft.com`.
    Odyssey connects automatically; send messages through normal guild chat.
 
 ## Commands
