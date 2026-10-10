@@ -3,7 +3,7 @@ min_version = "2026.10.3"
 lockfile = true
 
 [tools]
-java = "temurin-25.0.4+101.0.LTS"
+java = "temurin-21.0.12+8.0.LTS"
 python = "3.13.16"
 actionlint = "1.7.12"
 zizmor = "1.30.1"

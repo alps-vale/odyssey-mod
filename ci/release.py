@@ -38,7 +38,7 @@ WAYFINDER_AVATAR = (
 )
 COMPONENTS_V2 = 1 << 15
 RUNTIME_REQUIREMENTS = (
-    "Minecraft 1.21.11 · Java 25+ · Fabric Loader 0.19.3+ · "
+    "Minecraft 1.21.11 · Java 21+ · Fabric Loader 0.19.3+ · "
     "Fabric API 0.141.6+1.21.11 · "
     "Fabric Language Kotlin 1.13.13+kotlin.2.4.10"
 )

@@ -41,19 +41,19 @@ dependencies {
 }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
 }
 
 kotlin {
-    jvmToolchain(25)
-    compilerOptions.jvmTarget = JvmTarget.JVM_25
+    jvmToolchain(21)
+    compilerOptions.jvmTarget = JvmTarget.JVM_21
     sourceSets.main {
         kotlin.srcDir(generatedSources)
     }
 }
 
 tasks.withType<JavaCompile>().configureEach {
-    options.release = 25
+    options.release = 21
 }
 
 tasks.withType<AbstractArchiveTask>().configureEach {

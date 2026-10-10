@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Java 21 support, matching Minecraft 1.21.11's usual launcher runtime.
 - Background update checks with the usual Odyssey chat styling.
 - Signed updates that install after Minecraft closes on Windows, Linux, and macOS.
 - Opt-in automatic updates and a retained copy of the previous version.

@@ -4,7 +4,7 @@ A Fabric mod that connects Alps and Vale guild chat on Wynncraft with Discord.
 
 ## Setup
 
-Use Minecraft 1.21.11, Java 25 or newer, and Fabric Loader 0.19.3 or newer.
+Use Minecraft 1.21.11, Java 21 or newer, and Fabric Loader 0.19.3 or newer.
 
 1. Download `odyssey-mod.jar` from the [latest release](https://github.com/alps-vale/odyssey-mod/releases/latest)
    or the Odyssey release announcement in Discord.

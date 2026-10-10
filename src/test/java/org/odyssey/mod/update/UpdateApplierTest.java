@@ -43,7 +43,7 @@ class UpdateApplierTest {
         Files.writeString(mods.resolve("unrelated-mod.jar"), "leave this alone");
         directory = Files.createDirectory(UpdateApplier.directory(target));
         metadata = ("{\"id\":\"odyssey\",\"version\":\"0.2.0\",\"environment\":\"client\",\"depends\":{"
-                + "\"minecraft\":\"1.21.11\",\"java\":\">=25\",\"fabricloader\":\">=0.19.3\","
+                + "\"minecraft\":\"1.21.11\",\"java\":\">=21\",\"fabricloader\":\">=0.19.3\","
                 + "\"fabric-api\":\">=0.141.6+1.21.11\",\"fabric-language-kotlin\":\">=1.13.13+kotlin.2.4.10\"}}")
                 .getBytes(StandardCharsets.UTF_8);
         try (var zip = new ZipOutputStream(Files.newOutputStream(directory.resolve("pending.jar")))) {
@@ -54,7 +54,7 @@ class UpdateApplierTest {
         manifest = ("format=1\nversion=0.2.0\nurl=" + UpdateManifest.RELEASES + "download/v0.2.0/odyssey-mod.jar\n"
                 + "size=" + Files.size(staged) + "\nsha256=" + UpdateManifest.digest(staged) + "\n"
                 + "metadataSha256=" + UpdateManifest.digest(metadata) + "\nrequires.minecraft=1.21.11\n"
-                + "requires.java=>=25\nrequires.fabricloader=>=0.19.3\nrequires.fabric-api=>=0.141.6+1.21.11\n"
+                + "requires.java=>=21\nrequires.fabricloader=>=0.19.3\nrequires.fabric-api=>=0.141.6+1.21.11\n"
                 + "requires.fabric-language-kotlin=>=1.13.13+kotlin.2.4.10\n").getBytes(StandardCharsets.UTF_8);
         var signer = Signature.getInstance("Ed25519"); signer.initSign(key.getPrivate()); signer.update(manifest);
         signature = signer.sign();
