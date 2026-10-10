@@ -893,6 +893,8 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
 
 
     fun sendWelcomeHeader(index: Int, revision: Long) {
+        // Real WebSockets deliver frames only after the client requests demand.
+        eventually { sockets[index].requests > 0 }
         val current = identity()
         val welcome = ServerMessage.Welcome(
             PROTOCOL_VERSION,
@@ -954,6 +956,7 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
 
 private class FakeSocket : BridgeSocket {
     val sent = CopyOnWriteArrayList<String>()
+    @Volatile
     var requests = 0
     var closed = false
 

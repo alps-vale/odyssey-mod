@@ -27,7 +27,6 @@ DEPENDENCIES = {
 
 
 def install() -> None:
-    subprocess.run(["mise", "run", "build"], check=True)
     MODS.mkdir(parents=True, exist_ok=True)
     for pattern, expected in (("fabric-api-*.jar", next(iter(DEPENDENCIES))),
                               ("fabric-language-kotlin-*.jar", list(DEPENDENCIES)[1])):
@@ -57,8 +56,9 @@ def main() -> int:
         print("usage: python ci/local.py {install|menu|launch}", file=sys.stderr)
         return 2
     action = sys.argv[1]
-    install()
-    if action == "menu":
+    if action == "install":
+        install()
+    elif action == "menu":
         subprocess.run(["prismlauncher", "--launch", INSTANCE, "--show-window"], check=True)
     elif action == "launch":
         subprocess.run(["prismlauncher", "--launch", INSTANCE, "--server",

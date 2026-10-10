@@ -87,6 +87,7 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertIn(jar_url, card[-2]["content"])
         self.assertEqual(card[-1], {"type": 13, "file": {"url": "attachment://odyssey-mod.jar"}})
         self.assertEqual([item["filename"] for item in payload["attachments"]], [release.JAR_NAME])
+        self.assertNotIn("description", payload["attachments"][0])  # Unsupported by Components V2.
         content_type, data = release._multipart(payload, b"real fixture bytes")
         parsed = BytesParser(policy=default).parsebytes(
             f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + data)

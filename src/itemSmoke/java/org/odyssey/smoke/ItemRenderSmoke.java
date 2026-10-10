@@ -61,9 +61,12 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     if (encoded == null) throw new IllegalStateException("Wynntils gear registry did not load");
                 }
                 ticks.set(Integer.MIN_VALUE);
+                nativeNameColorSmoke();
+                if (encoded != null) rarityMetadataSmoke(encoded);
                 rewrittenGuildRankSmoke();
                 ItemStack stack = new ItemStack(Items.DIAMOND_SWORD);
-                stack.set(DataComponents.CUSTOM_NAME, Component.literal("Tooltip render fixture").withStyle(ChatFormatting.LIGHT_PURPLE));
+                stack.set(DataComponents.CUSTOM_NAME, Component.empty().append(
+                    Component.literal("Tooltip render fixture").withStyle(ChatFormatting.LIGHT_PURPLE)));
                 stack.set(DataComponents.LORE, new ItemLore(List.of(
                     Component.literal("Native tooltip colours and layout"),
                     Component.literal("+42% Walk Speed").withStyle(ChatFormatting.GREEN),
@@ -98,6 +101,9 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                             String png = (String) share.getClass().getMethod("getPng").invoke(share);
                             if (png == null) throw new IllegalStateException("Tooltip render timed out or exceeded bounds");
                             String kind = share.getClass().getMethod("getKind").invoke(share).toString();
+                            int color = (int) share.getClass().getMethod("getColor").invoke(share);
+                            int expectedColor = kind.equals("WYNNTILS") ? 0xAA00AA : 0xFF55FF;
+                            if (color != expectedColor) throw new IllegalStateException("Wrong rarity colour: " + Integer.toHexString(color));
                             Path file = kind.equals("WYNNTILS") ? output.resolveSibling("tooltip-wynntils.png") :
                                 (nativeIndex++ == 0 ? output : output.resolveSibling("tooltip-native-variant.png"));
                             Files.write(file, Base64.getDecoder().decode(png));
@@ -132,6 +138,27 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                 minecraft.stop();
             }
         });
+    }
+
+    private static void nativeNameColorSmoke() throws Exception {
+        Class<?> sharing = Class.forName("org.odyssey.mod.item.ItemSharing");
+        Method color = sharing.getDeclaredMethod("nameColor", Component.class);
+        color.setAccessible(true);
+        Object instance = sharing.getField("INSTANCE").get(null);
+        Component suffix = Component.literal(" coloured suffix").withStyle(ChatFormatting.LIGHT_PURPLE);
+        Component[] names = {
+            Component.literal("Default prefix").append(suffix),
+            Component.empty().withStyle(ChatFormatting.AQUA).append("Inherited name"),
+            Component.literal(" ").append(Component.literal("Nested name").withStyle(ChatFormatting.LIGHT_PURPLE)),
+            Component.empty()
+        };
+        int[] expected = {0xFFFFFF, 0x55FFFF, 0xFF55FF, 0xFFFFFF};
+        for (int index = 0; index < names.length; index++) {
+            if ((int) color.invoke(instance, names[index]) != expected[index]) {
+                throw new IllegalStateException("Wrong native name colour for fixture " + index);
+            }
+        }
+        System.out.println("[Odyssey Item Smoke] Native first-visible name colours PASS");
     }
 
     /** Exercise the installed Wynntils component rewrite, not a second decoder implementation. */
@@ -182,9 +209,13 @@ public final class ItemRenderSmoke implements ClientModInitializer {
 
     /** Build a fixture using Wynntils' own public item encoder, without a game account. */
     private static String encodedFixture() throws Exception {
+        return encodedFixture("Stratiformis");
+    }
+
+    private static String encodedFixture(String name) throws Exception {
         Class<?> models = Class.forName("com.wynntils.core.components.Models");
         Object gear = models.getField("Gear").get(null);
-        Object info = gear.getClass().getMethod("getGearInfoFromDisplayName", String.class).invoke(gear, "Stratiformis");
+        Object info = gear.getClass().getMethod("getGearInfoFromDisplayName", String.class).invoke(gear, name);
         if (info == null) return null;
         Class<?> statType = Class.forName("com.wynntils.models.stats.type.StatType");
         Class<?> possibleType = Class.forName("com.wynntils.models.stats.type.StatPossibleValues");
@@ -205,6 +236,11 @@ public final class ItemRenderSmoke implements ClientModInitializer {
         Object instance = instanceType.getMethod("create", infoType, List.class, List.class, int.class, Optional.class, requirementsType, Optional.class)
             .invoke(null, info, rolls, List.of(), 2, Optional.empty(), requirementsType.getField("UNKNOWN").get(null), Optional.empty());
         Object item = Class.forName("com.wynntils.models.items.items.game.GearItem").getConstructor(infoType, instanceType).newInstance(info, instance);
+        return encodeFixture(item);
+    }
+
+    private static String encodeFixture(Object item) throws Exception {
+        Class<?> models = Class.forName("com.wynntils.core.components.Models");
         Object encoding = models.getField("ItemEncoding").get(null);
         Class<?> itemType = Class.forName("com.wynntils.models.items.WynnItem");
         Class<?> settingsType = Class.forName("com.wynntils.models.items.encoding.type.EncodingSettings");
@@ -213,5 +249,37 @@ public final class ItemRenderSmoke implements ClientModInitializer {
         if ((boolean) result.getClass().getMethod("hasError").invoke(result)) throw new IllegalStateException("Wynntils fixture encoding failed");
         Object buffer = result.getClass().getMethod("getValue").invoke(result);
         return (String) encoding.getClass().getMethod("makeItemString", itemType, buffer.getClass()).invoke(encoding, item, buffer);
+    }
+
+    private static void rarityMetadataSmoke(String mythic) throws Exception {
+        Class<?> requirements = Class.forName("com.wynntils.models.gear.type.GearRequirements");
+        Object required = requirements.getConstructor(int.class, Optional.class, List.class, Optional.class)
+            .newInstance(100, Optional.empty(), List.of(), Optional.empty());
+        Class<?> instanceRequirements = Class.forName("com.wynntils.models.gear.type.GearInstanceRequirements");
+        Class<?> durability = Class.forName("com.wynntils.utils.type.CappedValue");
+        Class<?> type = Class.forName("com.wynntils.models.gear.type.GearType");
+        Object crafted = Class.forName("com.wynntils.models.items.items.game.CraftedGearItem")
+            .getConstructors()[0].newInstance("Crafted colour fixture", type.getField("CHESTPLATE").get(null),
+                null, 0, 4000, List.of(), List.of(), required, List.of(), List.of(), List.of(), 0,
+                instanceRequirements.getField("UNKNOWN").get(null), durability.getConstructor(int.class, int.class).newInstance(100, 100), 0);
+        List<String> codes = List.of(mythic, encodedFixture("Blue Mask"), encodeFixture(crafted));
+        Class<?> access = Class.forName("org.odyssey.mod.item.ItemSharing$WynntilsAccess");
+        var constructor = access.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        var decode = access.getDeclaredMethod("decode", String.class);
+        decode.setAccessible(true);
+        List<?> shares = (List<?>) decode.invoke(constructor.newInstance(), String.join(" ", codes));
+        if (shares.size() != 3) throw new IllegalStateException("Rarity fixtures did not decode");
+        int[] colors = {0xAA00AA, 0x55FFFF, 0x00AAAA};
+        for (int index = 0; index < shares.size(); index++) {
+            Object share = shares.get(index);
+            var color = share.getClass().getDeclaredMethod("getColor");
+            var original = share.getClass().getDeclaredMethod("getEncoded");
+            color.setAccessible(true);
+            original.setAccessible(true);
+            if ((int) color.invoke(share) != colors[index]) throw new IllegalStateException("Wrong rarity colour for fixture " + index);
+            if (!codes.get(index).equals(original.invoke(share))) throw new IllegalStateException("Item code changed during decoding");
+        }
+        System.out.println("[Odyssey Item Smoke] Mythic, legendary and crafted rarity colours and original codes PASS");
     }
 }
