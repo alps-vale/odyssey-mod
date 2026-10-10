@@ -20,6 +20,7 @@ import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -164,6 +165,7 @@ internal class BridgeClient(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : SocketEvents {
     private val commands = Channel<Command>(Channel.UNLIMITED)
+    private val queuedObservations = AtomicInteger()
     private val pending = PendingObservations(100)
     private val seenEvents = EventLru(1_024)
     private var socket: BridgeSocket? = null
@@ -193,8 +195,10 @@ internal class BridgeClient(
         commands.trySend(Command.Environment(address, playable))
     }
 
-    fun observe(authorUsername: String, content: String) {
-        commands.trySend(Command.Observe(authorUsername, content))
+    fun observe(authorUsername: String, content: String, itemShares: List<ItemShare> = emptyList()) {
+        // Keep control messages reliable, but do not queue unbounded image bytes behind them.
+        val shares = if (queuedObservations.incrementAndGet() > 16) itemShares.map { it.copy(png = null) } else itemShares
+        if (commands.trySend(Command.Observe(authorUsername, content, shares)).isFailure) queuedObservations.decrementAndGet()
     }
 
     fun reconnect() {
@@ -236,7 +240,11 @@ internal class BridgeClient(
             try {
                 when (command) {
                     is Command.Environment -> environment(command)
-                    is Command.Observe -> observation(command)
+                    is Command.Observe -> try {
+                        observation(command)
+                    } finally {
+                        queuedObservations.decrementAndGet()
+                    }
                     Command.Reconnect -> manualReconnect()
                     is Command.ConnectionProgress -> connectionProgress(command)
                     is Command.ConnectionSucceeded -> connectionSucceeded(command)
@@ -304,6 +312,7 @@ internal class BridgeClient(
             UUID.randomUUID().toString(),
             command.authorUsername,
             command.content,
+            command.itemShares,
         )
         runCatching { ProtocolCodec.encode(message) }.getOrElse { error ->
             OdysseyDiagnostics.logger.error("[Odyssey Mod] Guild observation encoding failed", error)
@@ -839,7 +848,7 @@ internal class BridgeClient(
 
     private sealed interface Command {
         data class Environment(val address: String?, val playable: Boolean) : Command
-        data class Observe(val authorUsername: String, val content: String) : Command
+        data class Observe(val authorUsername: String, val content: String, val itemShares: List<ItemShare>) : Command
         data object Reconnect : Command
         data class ConnectionProgress(val generation: Long, val stage: BridgeStage) : Command
         data class ConnectionSucceeded(
@@ -903,12 +912,20 @@ internal class BridgeClient(
     }
 }
 
-internal class PendingObservations(private val capacity: Int) {
+internal class PendingObservations(private val capacity: Int, private val imageBudget: Int = 4 * 1024 * 1024) {
     private val entries = LinkedHashMap<String, ClientMessage.GuildObservation>()
 
     fun add(message: ClientMessage.GuildObservation) {
         entries[message.id] = message
         while (entries.size > capacity) entries.remove(entries.keys.first())
+        var imageBytes = entries.values.sumOf { it.itemShares.sumOf { share -> share.png?.length ?: 0 } }
+        for ((id, observation) in entries) {
+            if (imageBytes <= imageBudget) break
+            val bytes = observation.itemShares.sumOf { it.png?.length ?: 0 }
+            if (bytes == 0) continue
+            entries[id] = observation.copy(itemShares = observation.itemShares.map { it.copy(png = null) })
+            imageBytes -= bytes
+        }
     }
 
     fun acknowledge(result: ServerMessage.ObservationResult) {

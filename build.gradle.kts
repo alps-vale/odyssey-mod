@@ -108,6 +108,37 @@ tasks.test {
     systemProperty("odyssey.helper.jar", updateHelperJar.get().archiveFile.get().asFile.absolutePath)
 }
 
+val itemSmoke = sourceSets.create("itemSmoke") {
+    compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().runtimeClasspath
+}
+
+loom {
+    mods {
+        register("odyssey") { sourceSet(sourceSets.main.get()) }
+        register("odyssey-item-smoke") { sourceSet(itemSmoke) }
+    }
+    runs {
+        register("itemSmoke") {
+            client()
+            source(itemSmoke)
+            runDir("build/item-smoke")
+            vmArg("-Dodyssey.itemSmoke.output=" + layout.buildDirectory.file("item-smoke/tooltip.png").get().asFile.absolutePath)
+        }
+    }
+}
+
+tasks.named("runItemSmoke") {
+    doFirst {
+        layout.buildDirectory.file("item-smoke/PASS").get().asFile.delete()
+    }
+    doLast {
+        check(layout.buildDirectory.file("item-smoke/PASS").get().asFile.isFile) {
+            "Item-sharing render did not pass; see build/item-smoke/logs/latest.log"
+        }
+    }
+}
+
 val nativeTestBundle by tasks.registering(Zip::class) {
     dependsOn(tasks.testClasses, updateHelperJar)
     archiveFileName.set("native-updater-tests.zip")

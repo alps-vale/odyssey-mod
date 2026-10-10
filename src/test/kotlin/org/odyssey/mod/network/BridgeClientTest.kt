@@ -563,6 +563,21 @@ class BridgeClientTest {
     }
 
     @Test
+    fun `pending image budget preserves chat and labels when previews are evicted`() {
+        val pending = PendingObservations(100, imageBudget = 12)
+        val share = ItemShare(ItemShareKind.WYNNTILS, "item", "Test item", 0xaa00aa, "AAAAAAAA")
+        pending.add(observation("1").copy(itemShares = listOf(share)))
+        pending.add(observation("2").copy(itemShares = listOf(share)))
+        assertEquals(2, pending.size())
+        assertEquals(listOf(share.copy(png = null)), pending.values()[0].itemShares)
+        assertEquals(listOf(share), pending.values()[1].itemShares)
+        assertEquals(observation("1").content, pending.values()[0].content)
+        pending.acknowledge(ServerMessage.ObservationResult(PROTOCOL_VERSION, "2", ObservationStatus.ACCEPTED))
+        pending.add(observation("3").copy(itemShares = listOf(share)))
+        assertEquals(listOf(share), pending.values().last().itemShares)
+    }
+
+    @Test
     fun `Wynncraft address matching accepts normalized subdomains with a strict domain boundary`() {
         listOf(
             "play.wynncraft.com",

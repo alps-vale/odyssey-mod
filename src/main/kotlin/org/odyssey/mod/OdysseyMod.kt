@@ -13,6 +13,8 @@ import org.odyssey.mod.config.OdysseyConfig
 import org.odyssey.mod.chat.BridgeChatRenderer
 import org.odyssey.mod.chat.OdysseyNotifications
 import org.odyssey.mod.chat.GuildChatDecorator
+import org.odyssey.mod.item.ItemSharing
+import net.minecraft.network.chat.Component
 import org.odyssey.mod.network.BackendOrigin
 import org.odyssey.mod.network.BridgeClient
 import org.odyssey.mod.network.JavaOdysseyTransport
@@ -111,8 +113,12 @@ object OdysseyMod : ClientModInitializer {
         OdysseyDiagnostics.logger.info("[Odyssey Mod] Initialized version={} backend={}", version, origin.http)
     }
 
-    fun observeGuildMessage(authorUsername: String, content: String) {
-        if (::bridge.isInitialized) bridge.observe(authorUsername, content)
+    internal fun observeGuildMessage(authorUsername: String, content: String, body: List<Component>) {
+        if (!::bridge.isInitialized) return
+        val connection = Minecraft.getInstance().connection
+        ItemSharing.capture(body, content) { shares ->
+            if (Minecraft.getInstance().connection === connection) bridge.observe(authorUsername, content, shares)
+        }
     }
 
     private fun tick(minecraft: Minecraft) {

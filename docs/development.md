@@ -8,6 +8,18 @@
 
 These commands do not install or launch Minecraft.
 
+### Item previews
+
+`mise run test-item-render` launches an isolated Minecraft client, renders a
+native hover-item fixture, and exits. It needs a display. The PNG and log are in
+`build/item-smoke/`; your normal game instance is untouched.
+
+To exercise Wynntils decoding too, put its Minecraft 1.21.11 JAR in
+`build/item-smoke/mods/`. Put your cached Wynncraft resource pack in
+`build/item-smoke/resourcepacks/wynncraft.zip` for the server's fonts and textures.
+The test uses Wynntils' own encoder to create a Stratiformis fixture, then checks
+Odyssey's decoding and rendering path. These files are not bundled in releases.
+
 ## Repository configuration
 
 `mise.toml` owns tool versions, commands, and build defaults. Gradle/Loom owns

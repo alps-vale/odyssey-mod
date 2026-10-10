@@ -25,6 +25,6 @@ abstract class ClientPacketListenerMixin {
     ) = OdysseyDiagnostics.callback("guild chat observation") {
         if (packet.overlay()) return@callback
         val parsed = GuildChatParser.parse(packet.content()) ?: return@callback
-        OdysseyMod.observeGuildMessage(parsed.authorUsername, parsed.content)
+        OdysseyMod.observeGuildMessage(parsed.authorUsername, parsed.content, packet.content().siblings.drop(5))
     }
 }

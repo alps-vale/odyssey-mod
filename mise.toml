@@ -32,6 +32,11 @@ description = "Run Odyssey unit tests"
 run = "./gradlew test"
 run_windows = "cmd.exe /d /c gradlew.bat test"
 
+[tasks.test-item-render]
+description = "Render an isolated tooltip in the real Minecraft client and exit (requires a display)"
+run = "./gradlew runItemSmoke"
+run_windows = "cmd.exe /d /c gradlew.bat runItemSmoke"
+
 [tasks.test-release]
 description = "Test the version/artifact/Discord release helpers without sending a message"
 run = "python ci/test_release.py"

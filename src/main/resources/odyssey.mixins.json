@@ -4,7 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "ChatComponentMixin",
-    "ClientPacketListenerMixin"
+    "ClientPacketListenerMixin",
+    "TooltipGuiRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
