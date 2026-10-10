@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Keep settings and the release cache under `config/odyssey/`.
+- Shorten the setup guide and move contributor details into separate documentation.
+
 ## 0.2.1
 
 - Fix a startup crash when Odyssey and Sequoia are installed together.

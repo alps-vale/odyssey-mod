@@ -17,9 +17,10 @@ internal data class OdysseyConfig(
 ) {
     companion object {
         private val json = Json { prettyPrint = true; encodeDefaults = true }
-        private val path by lazy {
-            FabricLoader.getInstance().configDir.resolve("odyssey.json")
+        val directory: Path by lazy {
+            FabricLoader.getInstance().configDir.resolve("odyssey")
         }
+        private val path by lazy { directory.resolve("config.json") }
 
         fun load(): OdysseyConfig = load(path)
 

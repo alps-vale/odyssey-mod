@@ -2,56 +2,51 @@
 
 A Fabric mod that connects Alps and Vale guild chat on Wynncraft with Discord.
 
-## Setup
+## Install
 
-Use Minecraft 1.21.11, Java 21 or newer, and Fabric Loader 0.19.3 or newer.
+Requires Minecraft 1.21.11, Java 21+, Fabric Loader 0.19.3+,
+Fabric API 0.141.6+1.21.11, and Fabric Language Kotlin 1.13.13+kotlin.2.4.10.
 
-1. Download `odyssey-mod.jar` from the [latest release](https://github.com/alps-vale/odyssey-mod/releases/latest)
-   or the Odyssey release announcement in Discord.
-2. Put it in your Minecraft instance's `mods` folder with Fabric API
-   0.141.6+1.21.11 and Fabric Language Kotlin 1.13.13+kotlin.2.4.10.
-3. Link your Minecraft profile using the Odyssey bot's `/link` command in
-   Discord. You also need an eligible Alps or Vale guild role.
-4. Launch the Fabric instance and join Wynncraft. Odyssey connects automatically.
+1. Download [odyssey-mod.jar](https://github.com/alps-vale/odyssey-mod/releases/latest/download/odyssey-mod.jar).
+2. Put it and the required Fabric mods in your instance's `mods` folder.
+   Keep only one Odyssey JAR installed.
+3. Link your Minecraft profile with Wayfinder's `/link` command in Discord.
+   You need an eligible Alps or Vale guild role.
+4. Join Wynncraft. Odyssey connects automatically; send messages through normal guild chat.
 
-### Commands
+## Commands
 
-- `/odyssey status` in Minecraft: show the bridge connection and linked identity.
-- `/odyssey reconnect` in Minecraft: reconnect after linking or fixing a connection problem.
+In Minecraft:
+
+- `/odyssey status`: show the connection and linked identity.
+- `/odyssey reconnect`: reconnect after linking or fixing a connection problem.
 - `/odyssey update`: show update status.
 - `/odyssey update check`: check for a new release.
-- `/odyssey update install`: install the available update when Minecraft closes.
+- `/odyssey update install`: download the available update for installation when Minecraft closes.
 - `/odyssey update auto on` or `off`: enable or disable automatic updates.
-- `/link` in Discord: link your Minecraft profile with the Odyssey bot.
 
-Send messages through normal Wynncraft guild chat; no separate mod command is needed.
-If the bridge stays disconnected, check `/odyssey status`, your linked profile,
-and your guild role, then run `/odyssey reconnect`.
+If the bridge stays disconnected, check your linked profile and guild role,
+then run `/odyssey reconnect`.
 
-The mod creates `config/odyssey.json` in your instance. `autoConnect`,
-`bridgeVisible`, and `discordRankOverrides` default to `true`.
-Restart Minecraft after changing these settings.
+## Updates
 
-### Updates
+Automatic updates are on by default. Odyssey checks for stable releases at most
+once a day and installs updates when Minecraft closes. Use `/odyssey update auto off`
+to opt out; the setting is saved. You can still check and install updates manually.
 
-Odyssey checks for stable releases in the background, at most once a day.
-Click **Update** in the chat notice to download an update; it installs after
-Minecraft closes. Automatic updates are on by default. Use
-`/odyssey update auto off` to disable them; your choice is saved across restarts.
+Updates work on Windows, Linux, and macOS. Odyssey verifies the release signature,
+JAR, and required dependencies before replacing the installed mod.
 
-The updater works on Windows, Linux, and macOS. It checks the release signature,
-the JAR, and your instance's dependencies before changing anything. It only
-replaces the installed Odyssey JAR, and keeps the previous copy in
-`mods/.odyssey-update/previous.jar`.
-
-If an update fails, the installed JAR stays in place. Try
-`/odyssey update install` again, or close Minecraft and replace the JAR manually.
-To roll back, close Minecraft and copy `previous.jar` over your Odyssey JAR.
+If Minecraft cannot start, close it and replace the Odyssey JAR manually.
+For a failed update, use `/odyssey update install` to retry. To roll back, close
+Minecraft and copy `mods/.odyssey-update/previous.jar` over the installed Odyssey JAR.
 Automatic updates pause after a rollback; `/odyssey update auto on` resumes them.
-Keep only one Odyssey JAR in `mods`. The updater cannot fix a Minecraft startup
-crash before Odyssey loads.
 
-**Version 0.1.0 needs one manual update** to gain the updater.
+## Settings
+
+Settings live in `config/odyssey/config.json`. `autoConnect`, `bridgeVisible`,
+`discordRankOverrides`, and `autoUpdate` default to `true`.
+Close Minecraft before editing the file. The `updates/` subfolder holds the release cache.
 
 ## Development
 
@@ -63,25 +58,8 @@ mise run ci
 ```
 
 `mise run build` creates `build/libs/odyssey-mod.jar`.
-CI builds and tests the mod once on Linux. Windows and macOS (Apple Silicon
-and Intel) run the same compiled updater checks without rebuilding Minecraft.
-It caches tools and Gradle state, cancels superseded checks, and promotes the
-tested Linux JAR. Only `main` updates shared caches; PRs and releases read them.
-These commands do not install or launch Minecraft.
-
-## Releases
-
-Update the changelog, then push an annotated tag such as `v0.2.0` from `main`,
-using that version's changelog as its tag message. After CI passes, the workflow
-creates a GitHub release and posts its changelog and runnable JAR to Discord as Wayfinder.
-The announcement includes a direct download link for that version.
-Set `DISCORD_RELEASE_WEBHOOK_URL` in the repository's Actions secrets.
-Stable releases also include `update.manifest` and its Ed25519 signature.
-Set `ODYSSEY_UPDATE_SIGNING_KEY` to the base64 PKCS#8 signing key; the matching
-public key is pinned in `src/main/resources/odyssey-update.pub`. The private key
-is used only in the release-signing step, never in builds or clients.
-Keep that key stable: changing the pinned public key requires a manual client
-update or an explicit key migration.
+See [development and releases](docs/development.md) for CI and publishing details,
+and the [changelog](CHANGELOG.md) for release notes.
 
 ## License
 

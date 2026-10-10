@@ -16,7 +16,7 @@ class OdysseyUpdaterTest {
     @TempDir lateinit var root: Path
 
     @Test fun `automatic updates default on unless explicitly disabled`() {
-        val path = root.resolve("config/odyssey.json")
+        val path = root.resolve("config/odyssey/config.json")
         assertTrue(OdysseyConfig.load(path).autoUpdate)
         assertTrue(OdysseyConfig.load(path).autoUpdate)
         Files.writeString(path, """{"autoConnect":false,"bridgeVisible":true}""")
@@ -37,7 +37,7 @@ class OdysseyUpdaterTest {
         try {
             worker.submit { entered.countDown(); release.await(5, TimeUnit.SECONDS) }
             assertTrue(entered.await(2, TimeUnit.SECONDS))
-            val path = root.resolve("config/odyssey.json")
+            val path = root.resolve("config/odyssey/config.json")
             val config = OdysseyConfig(autoConnect = false, autoUpdate = true)
             OdysseyConfig.save(config, path)
             val notices = mutableListOf<UpdateNotice>()

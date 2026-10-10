@@ -27,7 +27,7 @@ internal class OdysseyUpdater(
 ) {
     private val loader = FabricLoader.getInstance()
     private val target = installedJar()
-    private val cache by lazy { UpdateCache(loader.configDir.resolve("odyssey-updates")) }
+    private val cache by lazy { UpdateCache(OdysseyConfig.directory.resolve("updates")) }
     private val transport = UpdateTransport()
     private val queued = AtomicInteger()
     private var candidate: Candidate? = null
