@@ -8,6 +8,9 @@ import net.minecraft.server.Bootstrap
 import org.odyssey.mod.network.BridgeStage
 import org.odyssey.mod.network.BridgeStatus
 import org.odyssey.mod.network.BridgeWarning
+import org.odyssey.mod.network.GuildOnlineSnapshot
+import org.odyssey.mod.network.OnlineMember
+import org.odyssey.mod.network.GuildRef
 import org.odyssey.mod.network.RankColors
 import org.odyssey.mod.network.RankPresentation
 import org.odyssey.mod.update.UpdateNotice
@@ -19,6 +22,24 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OdysseyNotificationsTest {
+    @Test
+    fun `online report uses Odyssey styling and distinguishes hidden status from missing connections`() {
+        bootstrapMinecraft()
+        val snapshot = GuildOnlineSnapshot("2026-10-10T12:00:00Z", listOf(
+            OnlineMember("Alice", GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps"), true, "WC1", emptyList()),
+            OnlineMember("Vera", GuildRef("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Vale"), null, null, listOf("0.3.2")),
+        ))
+        val lines = OdysseyNotifications.onlineReport(snapshot, 1, true)
+        lines.forEach(::assertOdysseyPill)
+        assertTrue("Wynncraft as of 12:00 UTC" in lines[0].string)
+        assertTrue("online · WC1 · Odyssey not connected" in lines[1].string)
+        assertTrue("Wynncraft status hidden · Odyssey 0.3.2" in lines[2].string)
+        val fallback = OdysseyNotifications.onlineReport(snapshot, 1, false)
+        assertTrue(fallback.all { "[Odyssey]" in it.string })
+        assertTrue(fallback.all { line -> line.string.codePoints().noneMatch { it in 0xE000..0xE0FF } })
+        assertTrue("Choose a page" in OdysseyNotifications.onlineReport(snapshot, 2, false).single().string)
+    }
+
     @Test fun `update actions reuse Odyssey system source pill palette and literal fallback`() {
         bootstrapMinecraft()
         val message = OdysseyNotifications.update(UpdateNotice("Odyssey 0.2.0 is available.", UpdateNotice.Action.INSTALL), true)

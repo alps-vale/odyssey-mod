@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Show online Alps and Vale members, their guilds and connected Odyssey versions with `/odyssey online` and Wayfinder's `/online`.
+
 ## 0.3.1
 
 - Copy original Wynntils item codes from Discord previews.

@@ -181,6 +181,7 @@ internal class BridgeClient(
     private var reconnectJob: Job? = null
     private var connectionGeneration = 0L
     private var connectionJob: Job? = null
+    private var onlineJob: Job? = null
     private val pendingSocketTerminations = IdentityHashMap<BridgeSocket, Command>()
     private val fragments = StringBuilder()
     private var presentationTransfer: PresentationTransfer? = null
@@ -206,6 +207,10 @@ internal class BridgeClient(
     }
 
     fun status(): BridgeStatus = currentStatus
+
+    fun online(callback: (Result<GuildOnlineSnapshot>) -> Unit) {
+        commands.trySend(Command.Online(callback))
+    }
 
     fun stop() {
         commands.trySend(Command.Stop)
@@ -246,6 +251,13 @@ internal class BridgeClient(
                         queuedObservations.decrementAndGet()
                     }
                     Command.Reconnect -> manualReconnect()
+                    is Command.Online -> requestOnline(command)
+                    is Command.OnlineCompleted -> {
+                        if (command.socket === socket && welcomed && command.generation == connectionGeneration) {
+                            onlineJob = null
+                            game.execute { command.callback(command.result) }
+                        }
+                    }
                     is Command.ConnectionProgress -> connectionProgress(command)
                     is Command.ConnectionSucceeded -> connectionSucceeded(command)
                     is Command.ConnectionFailed -> connectionFailed(command)
@@ -326,6 +338,30 @@ internal class BridgeClient(
         }
         pending.add(message)
         if (welcomed) send(message) else if (eligible() && !stoppedByTerminalError) connectIfEligible()
+    }
+
+    private fun requestOnline(command: Command.Online) {
+        val current = socket
+        val authenticated = session
+        if (!welcomed || current == null || authenticated == null || !eligible()) {
+            game.execute { command.callback(Result.failure(IllegalStateException("Connect Odyssey before viewing guild activity."))) }
+            return
+        }
+        if (onlineJob != null) {
+            game.execute { command.callback(Result.failure(IllegalStateException("Guild activity is already loading."))) }
+            return
+        }
+        val generation = connectionGeneration
+        onlineJob = scope.launch {
+            val result = try {
+                Result.success(transport.online(authenticated.token))
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                Result.failure(IllegalStateException("Guild activity is unavailable. Try again shortly."))
+            }
+            commands.send(Command.OnlineCompleted(current, generation, command.callback, result))
+        }
     }
 
     private suspend fun manualReconnect() {
@@ -630,6 +666,7 @@ internal class BridgeClient(
             }
             return
         }
+        cancelOnline()
         socket = null
         welcomed = false
         fragments.clear()
@@ -665,6 +702,7 @@ internal class BridgeClient(
             return
         }
         submitOutbound(command.socket) { command.socket.close(1011, "transport_failed") }
+        cancelOnline()
         socket = null
         welcomed = false
         fragments.clear()
@@ -826,10 +864,16 @@ internal class BridgeClient(
     }
 
     private fun cancelConnectionAttempt() {
+        cancelOnline()
         connectionGeneration++
         connectionJob?.cancel()
         pendingSocketTerminations.clear()
         connectionJob = null
+    }
+
+    private fun cancelOnline() {
+        onlineJob?.cancel()
+        onlineJob = null
     }
 
     private fun cancelScheduledReconnect() {
@@ -850,6 +894,13 @@ internal class BridgeClient(
         data class Environment(val address: String?, val playable: Boolean) : Command
         data class Observe(val authorUsername: String, val content: String, val itemShares: List<ItemShare>) : Command
         data object Reconnect : Command
+        data class Online(val callback: (Result<GuildOnlineSnapshot>) -> Unit) : Command
+        data class OnlineCompleted(
+            val socket: BridgeSocket,
+            val generation: Long,
+            val callback: (Result<GuildOnlineSnapshot>) -> Unit,
+            val result: Result<GuildOnlineSnapshot>,
+        ) : Command
         data class ConnectionProgress(val generation: Long, val stage: BridgeStage) : Command
         data class ConnectionSucceeded(
             val generation: Long,

@@ -6,10 +6,14 @@ import net.minecraft.network.chat.HoverEvent
 import net.minecraft.network.chat.Style
 import org.odyssey.mod.network.BridgeStatus
 import org.odyssey.mod.network.BridgeWarning
+import org.odyssey.mod.network.GuildOnlineSnapshot
 import org.odyssey.mod.network.RankColors
 import org.odyssey.mod.update.UpdateManifest
 import org.odyssey.mod.update.UpdateNotice
 import java.net.URI
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 internal object OdysseyNotifications {
     private const val BRAND_START = 0x45C9C4
@@ -48,6 +52,38 @@ internal object OdysseyNotifications {
 
     fun reconnectRequested(usePill: Boolean): Component =
         notice("Reconnect requested.", NEUTRAL, usePill)
+
+    fun onlineReport(snapshot: GuildOnlineSnapshot, page: Int, usePill: Boolean): List<Component> {
+        val pages = maxOf(1, (snapshot.members.size + 14) / 15)
+        if (page !in 1..pages) return listOf(notice("Choose a page from 1 to $pages.", WARNING, usePill))
+        val time = runCatching {
+            DateTimeFormatter.ofPattern("HH:mm 'UTC'").withZone(ZoneOffset.UTC)
+                .format(Instant.parse(snapshot.refreshedAt))
+        }.getOrDefault("unknown time")
+        val heading = notice("Guild activity · page $page/$pages · Wynncraft as of $time", FROST, usePill)
+        val rows = snapshot.members.drop((page - 1) * 15).take(15).map { member ->
+            val state = when (member.online) {
+                true -> "online" + (member.server?.let { " · ${plain(it, 24)}" } ?: "")
+                false -> "offline in Wynncraft's last report"
+                null -> "Wynncraft status hidden"
+            }
+            val versions = member.modVersions.take(3).joinToString(", ") { plain(it, 64) }
+            val body = Component.literal(plain(member.username, 32)).withStyle(Style.EMPTY.withColor(FROST))
+                .append(Component.literal(" "))
+                .append(if (usePill) RankPillFactory.label(plain(member.guild.prefix, 16), guildColors)
+                    else Component.literal("[${plain(member.guild.prefix, 16)}]").withStyle(Style.EMPTY.withColor(BRAND_START)))
+                .append(Component.literal(" · $state · ").withStyle(Style.EMPTY.withColor(NEUTRAL)))
+                .append(Component.literal(if (versions.isEmpty()) "Odyssey not connected" else "Odyssey $versions")
+                    .withStyle(Style.EMPTY.withColor(if (versions.isEmpty()) NEUTRAL else BRAND_START)))
+            notice(body, usePill)
+        }
+        val empty = if (rows.isEmpty()) listOf(notice("No online members or Odyssey connections reported.", NEUTRAL, usePill)) else rows
+        return listOf(heading) + empty + notice("Wynncraft refreshes every 2 minutes; Odyssey connections are live.", NEUTRAL, usePill)
+    }
+
+    fun onlineError(message: String, usePill: Boolean): Component = notice(message, WARNING, usePill)
+
+    private fun plain(text: String, limit: Int): String = text.filterNot(Char::isISOControl).take(limit)
 
     fun update(update: UpdateNotice, usePill: Boolean): Component {
         val result = notice(update.text, if (update.warning) WARNING else FROST, usePill).copy()

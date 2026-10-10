@@ -21,6 +21,7 @@ Fabric API 0.141.6+1.21.11, and Fabric Language Kotlin 1.13.13+kotlin.2.4.10.
 In Minecraft:
 
 - `/odyssey status`: show the connection and linked identity.
+- `/odyssey online [page]`: show online Alps and Vale members, their guilds, and connected Odyssey versions.
 - `/odyssey reconnect`: reconnect after linking or fixing a connection problem.
 - `/odyssey update`: show update status.
 - `/odyssey update check`: check for a new release.
@@ -29,6 +30,10 @@ In Minecraft:
 
 If the bridge stays disconnected, check your linked profile and guild role,
 then run `/odyssey reconnect`.
+
+In Discord, Wayfinder's `/online` command shows the same report privately.
+Wynncraft status refreshes every two minutes; Odyssey connections are live.
+"Not connected" does not mean someone has no mod installed.
 
 ## Shared items
 
