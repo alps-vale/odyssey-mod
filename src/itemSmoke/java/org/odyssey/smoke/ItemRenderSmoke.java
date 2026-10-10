@@ -77,6 +77,7 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     return Unit.INSTANCE;
                 };
                 method.invoke(capture.getField("INSTANCE").get(null), List.of(), unsupported, fallback);
+                AtomicBoolean rendered = new AtomicBoolean();
                 Function1<List<?>, Unit> complete = shares -> {
                     try {
                         if (shares.size() != expected) throw new IllegalStateException("Wrong number of captured shares: " + shares.size());
@@ -92,7 +93,20 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                             Files.write(file, Base64.getDecoder().decode(png));
                             System.out.println("[Odyssey Item Smoke] " + kind + " tooltip PNG PASS");
                         }
-                        Files.writeString(output.resolveSibling("PASS"), "Native item-sharing render passed\n");
+                        rendered.set(true);
+                    } catch (Exception failure) {
+                        failure.printStackTrace();
+                        System.out.println("[Odyssey Item Smoke] FAIL");
+                        minecraft.execute(minecraft::stop);
+                    }
+                    return Unit.INSTANCE;
+                };
+                method.invoke(capture.getField("INSTANCE").get(null), List.of(body, second), content, complete);
+                Function1<List<?>, Unit> followingChat = shares -> {
+                    try {
+                        if (!rendered.get() || !shares.isEmpty()) throw new IllegalStateException("Plain chat overtook the item render");
+                        System.out.println("[Odyssey Item Smoke] Ordered chat completion PASS");
+                        Files.writeString(Path.of(destination).resolveSibling("PASS"), "Native item-sharing render and ordering passed\n");
                     } catch (Exception failure) {
                         failure.printStackTrace();
                         System.out.println("[Odyssey Item Smoke] FAIL");
@@ -101,7 +115,7 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     }
                     return Unit.INSTANCE;
                 };
-                method.invoke(capture.getField("INSTANCE").get(null), List.of(body, second), content, complete);
+                method.invoke(capture.getField("INSTANCE").get(null), List.of(), "following ordinary chat", followingChat);
             } catch (Exception failure) {
                 failure.printStackTrace();
                 System.out.println("[Odyssey Item Smoke] FAIL");

@@ -13,6 +13,7 @@ import java.util.regex.Pattern
 
 internal object ItemSharing {
     private var pendingCaptures = 0
+    private val completions = OrderedItemPreviews()
     private val wynntils by lazy { runCatching { WynntilsAccess() }.getOrNull() }
 
     fun capture(body: List<Component>, content: String, complete: (List<ItemShare>) -> Unit) {
@@ -24,12 +25,14 @@ internal object ItemSharing {
         }
         body.forEach { collectNative(it, content, items) }
         val selected = items.values.take(MAX_ITEM_SHARES)
+        val fallback = selected.map { it.preview(null) }
+        val finish = completions.begin(fallback, complete)
         if (selected.isEmpty()) {
-            complete(emptyList())
+            finish(emptyList())
             return
         }
         if (pendingCaptures >= 2) {
-            complete(selected.map { it.preview(null) })
+            finish(fallback)
             return
         }
         pendingCaptures += 1
@@ -37,7 +40,7 @@ internal object ItemSharing {
         fun next(index: Int) {
             if (index == selected.size) {
                 pendingCaptures -= 1
-                complete(previews)
+                finish(previews)
                 return
             }
             val item = selected[index]
