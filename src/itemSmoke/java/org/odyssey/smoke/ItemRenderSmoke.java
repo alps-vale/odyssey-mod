@@ -61,6 +61,7 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     if (encoded == null) throw new IllegalStateException("Wynntils gear registry did not load");
                 }
                 ticks.set(Integer.MIN_VALUE);
+                nativeNameColorSmoke();
                 if (encoded != null) rarityMetadataSmoke(encoded);
                 rewrittenGuildRankSmoke();
                 ItemStack stack = new ItemStack(Items.DIAMOND_SWORD);
@@ -137,6 +138,27 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                 minecraft.stop();
             }
         });
+    }
+
+    private static void nativeNameColorSmoke() throws Exception {
+        Class<?> sharing = Class.forName("org.odyssey.mod.item.ItemSharing");
+        Method color = sharing.getDeclaredMethod("nameColor", Component.class);
+        color.setAccessible(true);
+        Object instance = sharing.getField("INSTANCE").get(null);
+        Component suffix = Component.literal(" coloured suffix").withStyle(ChatFormatting.LIGHT_PURPLE);
+        Component[] names = {
+            Component.literal("Default prefix").append(suffix),
+            Component.empty().withStyle(ChatFormatting.AQUA).append("Inherited name"),
+            Component.literal(" ").append(Component.literal("Nested name").withStyle(ChatFormatting.LIGHT_PURPLE)),
+            Component.empty()
+        };
+        int[] expected = {0xFFFFFF, 0x55FFFF, 0xFF55FF, 0xFFFFFF};
+        for (int index = 0; index < names.length; index++) {
+            if ((int) color.invoke(instance, names[index]) != expected[index]) {
+                throw new IllegalStateException("Wrong native name colour for fixture " + index);
+            }
+        }
+        System.out.println("[Odyssey Item Smoke] Native first-visible name colours PASS");
     }
 
     /** Exercise the installed Wynntils component rewrite, not a second decoder implementation. */

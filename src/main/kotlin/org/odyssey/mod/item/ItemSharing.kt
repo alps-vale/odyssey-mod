@@ -78,7 +78,7 @@ internal object ItemSharing {
 
     private fun nameColor(name: Component): Int {
         return name.visit(FormattedText.StyledContentConsumer<Int> { style, text ->
-            if (text.isBlank()) Optional.empty() else Optional.ofNullable(style.color?.value)
+            if (text.isBlank()) Optional.empty() else Optional.of(style.color?.value ?: 0xFFFFFF)
         }, Style.EMPTY).orElse(0xFFFFFF)
     }
 
