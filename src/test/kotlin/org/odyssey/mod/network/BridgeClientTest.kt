@@ -364,25 +364,38 @@ class BridgeClientTest {
         client.stop()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `leaving during socket open cannot resurrect the stale socket`() {
+    fun `leaving during socket open cannot resurrect the stale socket`() = runTest {
         val game = FakeGame()
         val gate = CompletableDeferred<Unit>()
         val transport = FakeTransport { game.identity }.also {
             it.openSocketGate = gate
         }
-        val client = BridgeClient(transport, game, OdysseyConfig(), ReconnectPolicy { 0 })
+        val bridgeJob = SupervisorJob()
+        val client = BridgeClient(
+            transport,
+            game,
+            OdysseyConfig(),
+            ReconnectPolicy { 0 },
+            scope = CoroutineScope(coroutineContext + bridgeJob),
+        )
 
         client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
-        eventually { transport.openSocketCalls.get() == 1 }
+        runCurrent()
+        assertEquals(1, transport.openSocketCalls.get())
         client.updateEnvironment(null, false)
-        eventually { client.status() == BridgeStatus.Idle }
+        runCurrent()
+        assertEquals(BridgeStatus.Idle, client.status())
         assertTrue(transport.sockets.isEmpty())
 
         gate.complete(Unit)
         client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
-        eventually { transport.sockets.size == 1 }
+        runCurrent()
+        assertEquals(1, transport.sockets.size)
         client.stop()
+        runCurrent()
+        assertTrue(bridgeJob.isCancelled)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -550,25 +563,67 @@ class BridgeClientTest {
     }
 
     @Test
-    fun `Wynncraft address matching accepts only the normalized play host`() {
+    fun `Wynncraft address matching accepts normalized subdomains with a strict domain boundary`() {
         listOf(
             "play.wynncraft.com",
             "PLAY.WYNNCRAFT.COM:25565",
             " play.wynncraft.com.:443 ",
+            "lobby.wynncraft.com",
+            "LOBBY.WYNNCRAFT.COM:25565",
+            " lobby.wynncraft.com.:443 ",
+            "eu.wynncraft.com",
+            "AS.WYNNCRAFT.COM:25565",
+            "node.play.wynncraft.com.",
+            "node.lobby.wynncraft.com",
+            "region-2.wynncraft.com",
         ).forEach { address -> assertTrue(BridgeClient.isWynncraftAddress(address), address) }
         listOf(
             null,
             "",
             "wynncraft.com",
-            "lobby.wynncraft.com",
-            "node.play.wynncraft.com.",
+            ".wynncraft.com",
+            "node..wynncraft.com",
+            "-node.wynncraft.com",
+            "node-.wynncraft.com",
+            "node_name.wynncraft.com",
+            "https://play.wynncraft.com",
+            "user@play.wynncraft.com",
+            "${"a".repeat(64)}.wynncraft.com",
+            "${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(63)}.wynncraft.com",
             "wynncraft.com.evil.example",
             "notwynncraft.com",
             "play.wynncraft.com.evil.example:25565",
+            "lobby.wynncraft.com.evil.example:25565",
             "play.wynncraft.com:",
             "play.wynncraft.com:0",
             "play.wynncraft.com:65536",
+            "lobby.wynncraft.com:",
+            "lobby.wynncraft.com:0",
+            "lobby.wynncraft.com:65536",
         ).forEach { address -> assertFalse(BridgeClient.isWynncraftAddress(address), address) }
+    }
+
+    @Test
+    fun `joining through the lobby connects and manual reconnect opens a new socket`() {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, game, OdysseyConfig(), ReconnectPolicy { 0 })
+        try {
+            client.updateEnvironment("lobby.wynncraft.com", true)
+            eventually { transport.sockets.size == 1 }
+            transport.sendWelcome(0)
+            eventually { client.status() == BridgeStatus.Connected("Alice", "Alps") }
+
+            client.reconnect()
+
+            eventually { transport.sockets.size == 2 }
+            assertTrue(transport.sockets[0].closed)
+            transport.sendWelcome(1)
+            eventually { client.status() == BridgeStatus.Connected("Alice", "Alps") }
+            assertEquals(1, transport.challengeCalls.get(), "manual reconnect reuses the valid session")
+        } finally {
+            client.stop()
+        }
     }
 
     @Test
@@ -580,7 +635,7 @@ class BridgeClientTest {
         eventually { transport.sockets.size == 1 }
         PresentationRepository.replace(PresentationSnapshot(7))
 
-        client.updateEnvironment("lobby.wynncraft.com", false)
+        client.updateEnvironment("minecraft.example", false)
 
         eventually {
             transport.sockets.single().closed &&

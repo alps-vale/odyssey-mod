@@ -880,7 +880,12 @@ internal class BridgeClient(
                 }
                 else -> return false
             }
-            return host.removeSuffix(".") == WYNNCRAFT_ADDRESS
+            val normalizedHost = host.removeSuffix(".")
+            return normalizedHost.length <= 253 && normalizedHost.endsWith(".wynncraft.com") &&
+                normalizedHost.split('.').all { label ->
+                    label.length in 1..63 && label.first() != '-' && label.last() != '-' &&
+                        label.all { it in 'a'..'z' || it in '0'..'9' || it == '-' }
+                }
         }
         private val NORMAL_DISCONNECT_REASONS = setOf(
             "left_wynncraft",
