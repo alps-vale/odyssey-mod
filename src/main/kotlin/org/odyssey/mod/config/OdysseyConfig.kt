@@ -13,6 +13,7 @@ internal data class OdysseyConfig(
     val autoConnect: Boolean = true,
     val bridgeVisible: Boolean = true,
     val discordRankOverrides: Boolean = true,
+    val autoUpdate: Boolean = false,
 ) {
     companion object {
         private val json = Json { prettyPrint = true }
@@ -43,7 +44,7 @@ internal data class OdysseyConfig(
             save(config, path)
         }
 
-        private fun save(config: OdysseyConfig, path: Path) {
+        internal fun save(config: OdysseyConfig, path: Path) {
             Files.createDirectories(path.parent)
             val temporary = path.resolveSibling("${path.fileName}.tmp")
             Files.writeString(temporary, json.encodeToString(serializer(), config))

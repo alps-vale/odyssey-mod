@@ -12,7 +12,7 @@ plugins {
 group = "org.odyssey"
 version = providers.gradleProperty("mod_version")
     .orElse(providers.environmentVariable("ODYSSEY_VERSION"))
-    .orElse("0.1.0-SNAPSHOT")
+    .orElse("0.2.0-SNAPSHOT")
     .get()
 
 val backendUrl = providers.gradleProperty("backend_url").orNull
@@ -41,19 +41,19 @@ dependencies {
 }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
 }
 
 kotlin {
-    jvmToolchain(25)
-    compilerOptions.jvmTarget = JvmTarget.JVM_25
+    jvmToolchain(21)
+    compilerOptions.jvmTarget = JvmTarget.JVM_21
     sourceSets.main {
         kotlin.srcDir(generatedSources)
     }
 }
 
 tasks.withType<JavaCompile>().configureEach {
-    options.release = 25
+    options.release = 21
 }
 
 tasks.withType<AbstractArchiveTask>().configureEach {
@@ -73,6 +73,25 @@ tasks.withType<Test>().configureEach {
 
 tasks.named<RemapJarTask>("remapJar") {
     archiveFileName.set("odyssey-mod.jar")
+}
+
+val updateHelperJar by tasks.registering(Jar::class) {
+    dependsOn(tasks.compileJava)
+    archiveFileName.set("odyssey-update-helper.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("update-helper"))
+    from(tasks.compileJava.flatMap { it.destinationDirectory })
+    from("src/main/resources/odyssey-update.pub")
+    manifest.attributes["Main-Class"] = "org.odyssey.mod.update.UpdateApplier"
+}
+
+tasks.processResources {
+    dependsOn(updateHelperJar)
+    from(updateHelperJar) { into("updates") }
+}
+
+tasks.test {
+    dependsOn(updateHelperJar)
+    systemProperty("odyssey.helper.jar", updateHelperJar.get().archiveFile.get().asFile.absolutePath)
 }
 
 val generateBackendConfig by tasks.registering {

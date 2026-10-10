@@ -10,12 +10,21 @@ on:
 permissions:
   contents: read
 
+env:
+  # Each job explicitly installs its own tool subset with mise-action.
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+# Superseded PR/main checks can stop; a tagged release must finish publishing.
+concurrency:
+  group: odyssey-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, windows-2025]
+        runner: [ubuntu-24.04, windows-2025, macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -23,24 +32,26 @@ jobs:
       # actions/checkout v7.0.1; action.yml runs on node24.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ startsWith(github.ref, 'refs/tags/v') && '0' || '1' }}
           persist-credentials: false
-
-      # Restore shared tools on all events; PRs never write the cache.
-      # actions/cache/restore v6.1.0; action.yml runs on node24.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: runner.os == 'Linux'
-        with:
-          path: ~/.local/share/mise/installs
-          key: mise-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.lock') }}
 
       # jdx/mise-action v5.1.1; action.yml runs on node24.
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        # zizmor: ignore[cache-poisoning] -- Only main saves; GitHub scopes PR caches away from main/releases.
         with:
           version: 2026.10.3
-          install_args: --locked
-          cache: false
+          install_args: ${{ runner.os == 'Linux' && '--locked' || '--locked java python' }}
+          cache: true
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # The publisher reads the same Linux tool cache, installing only Java/Python.
+          cache_key: "odyssey-mise-v2-{{version}}-{{platform}}-{{file_hash}}"
           github_token: ""
+
+      # Gradle actions v6.4.0; action.yml runs on node24. Only main writes reusable state.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        # zizmor: ignore[cache-poisoning] -- Main-only writes; PR/tag jobs are read-only with GitHub branch isolation.
+        with:
+          cache-read-only: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
 
       - name: Verify tag provenance and select mod version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -57,7 +68,24 @@ jobs:
       - name: Build, test, and lint
         env:
           ODYSSEY_VERSION: ${{ steps.release.outputs.version }}
-        run: mise run ci
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            mise run ci
+          else
+            mise run build
+          fi
+
+      - name: Retain native updater test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: updater-tests-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            build/test-results/test/TEST-org.odyssey.mod.update.*.xml
+            build/test-results/test/TEST-org.odyssey.mod.chat.OdysseyNotificationsTest.xml
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Validate and record the remapped artifact
         env:
@@ -69,7 +97,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version "$RELEASE_VERSION" --metadata build/libs/release-artifact.json --source-sha "$SHA"
           else
-            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.1.0-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
+            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.2.0-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
           fi
 
       # actions/upload-artifact v7.0.2; action.yml runs on node24.
@@ -82,13 +110,6 @@ jobs:
             build/libs/release-artifact.json
           if-no-files-found: error
           retention-days: 14
-
-      # actions/cache/save v6.1.0; action.yml runs on node24. Trusted writes only.
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: runner.os == 'Linux' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-        with:
-          path: ~/.local/share/mise/installs
-          key: mise-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.lock') }}
 
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -108,10 +129,13 @@ jobs:
 
       # jdx/mise-action v5.1.1; action.yml runs on node24.
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        # zizmor: ignore[cache-poisoning] -- Tag-only publisher restores trusted main caches and never saves.
         with:
           version: 2026.10.3
-          install_args: --locked
-          cache: false
+          install_args: --locked java python
+          cache: true
+          cache_save: false
+          cache_key: "odyssey-mise-v2-{{version}}-{{platform}}-{{file_hash}}"
           github_token: ""
 
       # actions/download-artifact v8.0.1; action.yml runs on node24.
@@ -128,25 +152,41 @@ jobs:
           version="$(mise run --quiet release-version --tag "$TAG")"
           mise run --quiet verify-release-artifact --jar release-artifact/odyssey-mod.jar --metadata release-artifact/release-artifact.json --version "$version" --source-sha "$SHA"
 
+      - name: Sign stable update manifest
+        if: "!contains(github.ref_name, '-')"
+        env:
+          TAG: ${{ github.ref_name }}
+          ODYSSEY_UPDATE_SIGNING_KEY: ${{ secrets.ODYSSEY_UPDATE_SIGNING_KEY }}
+        run: |
+          mise run --quiet update-manifest --jar release-artifact/odyssey-mod.jar --tag "$TAG" --output release-artifact/update.manifest
+          mise run --quiet sign-update-manifest release-artifact/update.manifest src/main/resources/odyssey-update.pub
+
       - name: Create release and upload the same runnable JAR
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          assets=(release-artifact/odyssey-mod.jar)
+          if [[ "$TAG" != *-* ]]; then
+            assets+=(release-artifact/update.manifest release-artifact/update.manifest.sig)
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            if gh release view "$TAG" --json assets --jq '.assets[] | select(.name == "odyssey-mod.jar") | .name' | grep -qx 'odyssey-mod.jar'; then
-              mkdir -p existing-release-asset
-              gh release download "$TAG" --pattern odyssey-mod.jar --dir existing-release-asset
-              cmp --silent release-artifact/odyssey-mod.jar existing-release-asset/odyssey-mod.jar
-            else
-              gh release upload "$TAG" release-artifact/odyssey-mod.jar
-            fi
+            mkdir -p existing-release-asset
+            for asset in "${assets[@]}"; do
+              name="${asset##*/}"
+              if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
+                gh release download "$TAG" --pattern "$name" --dir existing-release-asset
+                cmp --silent "$asset" "existing-release-asset/$name"
+              else
+                gh release upload "$TAG" "$asset"
+              fi
+            done
           elif [[ "$TAG" == v0.1.0 ]]; then
-            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-file CHANGELOG.md
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-file CHANGELOG.md
           elif [[ "$TAG" == *-* ]]; then
-            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --title "Odyssey $TAG" --generate-notes --prerelease --latest=false
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --title "Odyssey $TAG" --notes-from-tag --prerelease --latest=false
           else
-            gh release create "$TAG" release-artifact/odyssey-mod.jar --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --generate-notes
+            gh release create "$TAG" "${assets[@]}" --verify-tag --draft=false --prerelease=false --latest --title "Odyssey $TAG" --notes-from-tag
           fi
 
       - name: Announce release to Discord and verify readback
