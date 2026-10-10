@@ -9,6 +9,7 @@ actionlint = "1.7.12"
 zizmor = "1.30.1"
 
 [env]
+ODYSSEY_ANNOUNCEMENTS_URL = { default = "https://odyssey.notes.supply/api/v1/automations/releases/messages" }
 ODYSSEY_BACKEND_URL = { default = "https://odyssey.notes.supply" }
 ODYSSEY_VERSION = { default = "0.2.3-SNAPSHOT" }
 ODYSSEY_DEVELOPMENT = { default = "false" }
@@ -68,6 +69,10 @@ run = "python ci/release.py verify-artifact"
 [tasks.release-announce]
 description = "Announce a GitHub release to Discord and verify the message and attachments"
 run = "python ci/release.py announce"
+
+[tasks.publisher-preflight]
+description = "Authenticate the bot publisher without posting a message"
+run = "python ci/release.py preflight"
 
 [tasks.update-manifest]
 description = "Create compatibility metadata for a stable release"
