@@ -132,7 +132,7 @@ def discord_payload(tag: str, body: str, release_url: str, jar_url: str) -> dict
             }
         ],
         "attachments": [
-            {"id": 0, "filename": JAR_NAME, "description": "Runnable remapped Fabric mod"},
+            {"id": 0, "filename": JAR_NAME},
         ],
     }
 
