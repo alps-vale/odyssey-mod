@@ -260,7 +260,21 @@ internal class BridgeClient(
                     is Command.OnlineCompleted -> {
                         if (command.socket === socket && welcomed && command.generation == connectionGeneration) {
                             onlineJob = null
-                            dispatchOnline(command.epoch, command.callback, command.result)
+                            val error = command.result.exceptionOrNull()
+                            when {
+                                error is TransportException && error.code == "token_invalid" -> {
+                                    session = null
+                                    disconnect("session_expired", clearSession = true)
+                                    game.showWarning(BridgeWarning("session_expired", "Your Odyssey session expired. Reconnecting."))
+                                    connectIfEligible()
+                                }
+                                error is TransportException && error.code in TERMINAL_CODES -> handleConnectionError(error)
+                                else -> dispatchOnline(command.epoch, command.callback,
+                                    command.result.fold(
+                                        onSuccess = { Result.success(it) },
+                                        onFailure = { Result.failure(IllegalStateException("Guild activity is unavailable. Try again shortly.")) },
+                                    ))
+                            }
                         }
                     }
                     is Command.ConnectionProgress -> connectionProgress(command)
@@ -364,8 +378,8 @@ internal class BridgeClient(
                 Result.success(transport.online(authenticated.token))
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (_: Exception) {
-                Result.failure(IllegalStateException("Guild activity is unavailable. Try again shortly."))
+            } catch (error: Exception) {
+                Result.failure(error)
             }
             commands.send(Command.OnlineCompleted(current, generation, epoch, command.callback, result))
         }

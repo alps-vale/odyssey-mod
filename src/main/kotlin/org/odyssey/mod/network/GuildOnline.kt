@@ -13,7 +13,7 @@ internal data class GuildOnlineSnapshot(
 internal data class OnlineMember(
     val username: String,
     val guild: GuildRef,
-    val online: Boolean?,
-    val server: String?,
+    val online: Boolean? = null,
+    val server: String? = null,
     @SerialName("mod_versions") val modVersions: List<String>,
 )
