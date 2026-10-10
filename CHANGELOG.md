@@ -2,6 +2,7 @@
 
 ## 0.3.1
 
+- Copy original Wynntils item codes from Discord previews.
 - Match shared item embeds to their rarity colour, including crafted items.
 - Fix release announcements failing to attach the mod.
 
