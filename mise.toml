@@ -11,7 +11,7 @@ zizmor = "1.30.1"
 [env]
 ODYSSEY_ANNOUNCEMENTS_URL = { default = "https://odyssey.notes.supply/api/v1/automations/releases/messages" }
 ODYSSEY_BACKEND_URL = { default = "https://odyssey.notes.supply" }
-ODYSSEY_VERSION = { default = "0.3.0-SNAPSHOT" }
+ODYSSEY_VERSION = { default = "0.3.1-SNAPSHOT" }
 ODYSSEY_DEVELOPMENT = { default = "false" }
 ODYSSEY_PRISM_INSTANCE = { default = "odyssey-testing" }
 PRISM_ROOT = { default = """\
@@ -45,6 +45,12 @@ run = "python ci/test_release.py"
 description = "Build and remap Odyssey without installing it into PrismLauncher"
 run = "./gradlew build"
 run_windows = "cmd.exe /d /c gradlew.bat build"
+
+[tasks.dev-client]
+description = "Launch the Fabric development client"
+env.ODYSSEY_DEVELOPMENT = "true"
+run = "./gradlew runClient"
+run_windows = "cmd.exe /d /c gradlew.bat runClient"
 
 [tasks.ci]
 description = "Run workflow lint and the complete Gradle build/test graph"
@@ -89,12 +95,15 @@ run = "java ci/ReleaseSigner.java"
 
 [tasks.install]
 description = "Install the production build into the configured PrismLauncher instance"
+depends = ["build"]
 run = "python ci/local.py install"
 
 [tasks.menu]
 description = "Install Odyssey and open the configured PrismLauncher instance"
+depends = ["install"]
 run = "python ci/local.py menu"
 
 [tasks.launch]
 description = "Install Odyssey and connect the configured instance to Wynncraft"
+depends = ["install"]
 run = "python ci/local.py launch"

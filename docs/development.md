@@ -8,6 +8,10 @@
 
 These commands do not install or launch Minecraft.
 
+`mise run dev-client` launches the Fabric development client with development mode
+enabled. `mise run install`, `menu`, and `launch` build once before installing into
+the configured PrismLauncher instance.
+
 ### Item previews
 
 `mise run test-item-render` launches an isolated Minecraft client, renders a
