@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Connect through any `*.wynncraft.com` address, including lobby and regional hosts.
+
 ## 0.2.2
 
 - Keep settings and the release cache under `config/odyssey/`.
