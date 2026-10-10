@@ -4,12 +4,15 @@ import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.HoverEvent
+import net.minecraft.network.chat.FormattedText
+import net.minecraft.network.chat.Style
 import net.minecraft.world.item.ItemStack
 import org.odyssey.mod.OdysseyDiagnostics
 import org.odyssey.mod.network.ItemShare
 import org.odyssey.mod.network.ItemShareKind
 import org.odyssey.mod.network.MAX_ITEM_SHARES
 import java.util.regex.Pattern
+import java.util.Optional
 
 internal object ItemSharing {
     private var pendingCaptures = 0
@@ -73,8 +76,20 @@ internal object ItemSharing {
         component.siblings.forEach { collectNative(it, content, items) }
     }
 
-    private data class SharedStack(val encoded: String, val name: String, val kind: ItemShareKind, val stack: ItemStack) {
-        fun preview(png: String?) = ItemShare(kind, encoded, name, stack.hoverName.style.color?.value ?: 0xFFAA00, png)
+    private fun nameColor(name: Component): Int {
+        return name.visit(FormattedText.StyledContentConsumer<Int> { style, text ->
+            if (text.isBlank()) Optional.empty() else Optional.ofNullable(style.color?.value)
+        }, Style.EMPTY).orElse(0xFFFFFF)
+    }
+
+    private data class SharedStack(
+        val encoded: String,
+        val name: String,
+        val kind: ItemShareKind,
+        val stack: ItemStack,
+        val color: Int = nameColor(stack.hoverName),
+    ) {
+        fun preview(png: String?) = ItemShare(kind, encoded, name, color, png)
     }
 
     // Only custom Wynntils API names are reflected. Minecraft calls remain remapped by Loom.
@@ -89,6 +104,10 @@ internal object ItemSharing {
             .getConstructor(wynnItemClass, String::class.java)
         private val namedItem = Class.forName("com.wynntils.models.items.properties.NamedItemProperty")
         private val getName = namedItem.getMethod("getName")
+        private val tierItem = Class.forName("com.wynntils.models.items.properties.GearTierItemProperty")
+        private val getTier = tierItem.getMethod("getGearTier")
+        private val getFormatting = Class.forName("com.wynntils.models.gear.type.GearTier")
+            .getMethod("getChatFormatting")
 
         fun decode(content: String): List<SharedStack> {
             val matcher = pattern.matcher(content)
@@ -107,7 +126,12 @@ internal object ItemSharing {
                     if (name.isEmpty() || name.codePointCount(0, name.length) > 128 || name.any(Char::isISOControl)) {
                         return@runCatching null
                     }
-                    SharedStack(reference, name, ItemShareKind.WYNNTILS, fakeStack.newInstance(item, "From chat") as ItemStack)
+                    val stack = fakeStack.newInstance(item, "From chat") as ItemStack
+                    val color = if (tierItem.isInstance(item)) {
+                        val tier = getTier.invoke(item)
+                        (getFormatting.invoke(tier) as net.minecraft.ChatFormatting).color
+                    } else null
+                    SharedStack(reference, name, ItemShareKind.WYNNTILS, stack, color ?: nameColor(stack.hoverName))
                 }.getOrNull()
                 if (decoded != null) items.add(decoded)
             }
