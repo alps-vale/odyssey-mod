@@ -22,6 +22,114 @@ import kotlin.test.assertTrue
 
 class BridgeClientTest {
     @Test
+    fun `rejected activity bearer triggers fresh authentication instead of reusing expired session`() {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, game, OdysseyConfig(), ReconnectPolicy { 0 })
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            eventually { transport.sockets.size == 1 }
+            transport.sendWelcome(0)
+            eventually { client.status() is BridgeStatus.Connected }
+            transport.onlineFailure = TransportException("token_invalid", false, "Token expired")
+            client.online { error("Rejected bearer must not return a misleading temporary failure") }
+            eventually { transport.challengeCalls.get() == 2 && transport.sockets.size == 2 }
+            transport.onlineFailure = null
+            transport.sendWelcome(1)
+            eventually { client.status() is BridgeStatus.Connected }
+            val results = CopyOnWriteArrayList<Result<GuildOnlineSnapshot>>()
+            client.online(results::add)
+            eventually { results.size == 1 }
+            assertTrue(results.single().isSuccess)
+        } finally {
+            client.stop()
+        }
+    }
+
+    @Test
+    fun `queued game thread online result is discarded after a manual reconnect`() {
+        val game = FakeGame()
+        val queued = CopyOnWriteArrayList<() -> Unit>()
+        val delayedGame = object : GameAccess by game {
+            override fun execute(action: () -> Unit) { queued.add(action) }
+        }
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, delayedGame, OdysseyConfig(), ReconnectPolicy { 0 })
+        val results = CopyOnWriteArrayList<Result<GuildOnlineSnapshot>>()
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            eventually { transport.sockets.size == 1 }
+            transport.sendWelcome(0)
+            eventually { client.status() is BridgeStatus.Connected }
+            client.online(results::add)
+            eventually { queued.isNotEmpty() }
+            client.reconnect()
+            queued.forEach { it() }
+            assertTrue(results.isEmpty(), "The report belonged to the socket before reconnect")
+        } finally {
+            client.stop()
+        }
+    }
+
+    @Test
+    fun `online report requires a welcomed connection and network failure does not disconnect`() {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, game, OdysseyConfig(), ReconnectPolicy { 0 })
+        val results = CopyOnWriteArrayList<Result<GuildOnlineSnapshot>>()
+        try {
+            client.online(results::add)
+            eventually { results.size == 1 }
+            assertTrue(results[0].isFailure)
+            assertEquals(0, transport.onlineCalls.get())
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            eventually { transport.sockets.size == 1 }
+            transport.sendWelcome(0)
+            eventually { client.status() is BridgeStatus.Connected }
+            client.online(results::add)
+            eventually { results.size == 2 }
+            assertEquals("2026-10-10T12:00:00Z", results[1].getOrThrow().refreshedAt)
+            transport.onlineFailure = IOException("private remote detail")
+            client.online(results::add)
+            eventually { results.size == 3 }
+            assertEquals("Guild activity is unavailable. Try again shortly.", results[2].exceptionOrNull()?.message)
+            assertTrue(client.status() is BridgeStatus.Connected)
+            assertTrue(game.executeCalls.get() >= 3)
+        } finally {
+            client.stop()
+        }
+    }
+
+    @Test
+    fun `online requests are bounded and leaving the server cancels their result`() {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, game, OdysseyConfig(), ReconnectPolicy { 0 })
+        val results = CopyOnWriteArrayList<Result<GuildOnlineSnapshot>>()
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            eventually { transport.sockets.size == 1 }
+            transport.sendWelcome(0)
+            eventually { client.status() is BridgeStatus.Connected }
+            val gate = CompletableDeferred<Unit>()
+            transport.onlineGate = gate
+            client.online(results::add)
+            eventually { transport.onlineCalls.get() == 1 }
+            client.online(results::add)
+            eventually { results.size == 1 }
+            assertEquals("Guild activity is already loading.", results[0].exceptionOrNull()?.message)
+            assertEquals(1, transport.onlineCalls.get())
+            client.updateEnvironment(null, false)
+            eventually { client.status() == BridgeStatus.Idle }
+            gate.complete(Unit)
+            Thread.sleep(50)
+            assertEquals(1, results.size, "No completed report should leak into another connection")
+        } finally {
+            client.stop()
+        }
+    }
+
+    @Test
     fun `replays same observation ids reconnects transiently and stops terminally`() {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }
@@ -857,6 +965,16 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
     val openSocketCalls = AtomicInteger()
     var openSocketGate: CompletableDeferred<Unit>? = null
     var failureBeforeOpenReturns: Throwable? = null
+    val onlineCalls = AtomicInteger()
+    var onlineGate: CompletableDeferred<Unit>? = null
+    var onlineFailure: Exception? = null
+
+    override suspend fun online(token: String): GuildOnlineSnapshot {
+        onlineCalls.incrementAndGet()
+        onlineGate?.await()
+        onlineFailure?.let { throw it }
+        return GuildOnlineSnapshot("2026-10-10T12:00:00Z", emptyList())
+    }
     private lateinit var events: SocketEvents
 
     override suspend fun challenge(): MinecraftChallenge {

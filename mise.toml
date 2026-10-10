@@ -11,7 +11,7 @@ zizmor = "1.30.1"
 [env]
 ODYSSEY_ANNOUNCEMENTS_URL = { default = "https://odyssey.notes.supply/api/v1/automations/releases/messages" }
 ODYSSEY_BACKEND_URL = { default = "https://odyssey.notes.supply" }
-ODYSSEY_VERSION = { default = "0.3.1-SNAPSHOT" }
+ODYSSEY_VERSION = { default = "0.3.2-SNAPSHOT" }
 ODYSSEY_DEVELOPMENT = { default = "false" }
 ODYSSEY_PRISM_INSTANCE = { default = "odyssey-testing" }
 PRISM_ROOT = { default = """\

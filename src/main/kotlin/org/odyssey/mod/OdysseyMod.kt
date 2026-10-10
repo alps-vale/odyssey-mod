@@ -1,6 +1,9 @@
 package org.odyssey.mod
 
 import com.mojang.brigadier.Command
+import com.mojang.brigadier.arguments.IntegerArgumentType
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
@@ -87,6 +90,12 @@ object OdysseyMod : ClientModInitializer {
                                 ),
                         )
                         .then(
+                            literal("online").executes { context -> showOnline(context.source, 1) }
+                                .then(argument("page", IntegerArgumentType.integer(1)).executes { context ->
+                                    showOnline(context.source, IntegerArgumentType.getInteger(context, "page"))
+                                }),
+                        )
+                        .then(
                             literal("status").executes { context ->
                                 OdysseyDiagnostics.callback("status command") {
                                     context.source.sendFeedback(
@@ -111,6 +120,20 @@ object OdysseyMod : ClientModInitializer {
             }
         }
         OdysseyDiagnostics.logger.info("[Odyssey Mod] Initialized version={} backend={}", version, origin.http)
+    }
+
+    private fun showOnline(source: FabricClientCommandSource, page: Int): Int {
+        val minecraft = Minecraft.getInstance()
+        val connection = minecraft.connection
+        val profile = minecraft.user.profileId
+        bridge.online { result ->
+            if (minecraft.connection !== connection || minecraft.user.profileId != profile) return@online
+            result.fold(
+                onSuccess = { snapshot -> OdysseyNotifications.onlineReport(snapshot, page, commandUsesPill()).forEach(source::sendFeedback) },
+                onFailure = { source.sendFeedback(OdysseyNotifications.onlineError(it.message ?: "Guild activity is unavailable.", commandUsesPill())) },
+            )
+        }
+        return Command.SINGLE_SUCCESS
     }
 
     internal fun observeGuildMessage(authorUsername: String, content: String, body: List<Component>) {

@@ -21,6 +21,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 internal interface OdysseyTransport {
     suspend fun challenge(): MinecraftChallenge
     suspend fun complete(challengeId: String, username: String): OdysseySession
+    suspend fun online(token: String): GuildOnlineSnapshot
     suspend fun openSocket(token: String, events: SocketEvents): BridgeSocket
 }
 
@@ -86,6 +87,14 @@ internal class JavaOdysseyTransport(
         val request = request("/api/v1/auth/minecraft/complete")
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(payload))
+            .build()
+        return restJson.decodeFromString(send(request))
+    }
+
+    override suspend fun online(token: String): GuildOnlineSnapshot {
+        val request = request("/api/v1/guilds/online")
+            .header("Authorization", "Bearer $token")
+            .GET()
             .build()
         return restJson.decodeFromString(send(request))
     }
