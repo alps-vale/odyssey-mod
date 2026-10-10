@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Connect when joining through `lobby.wynncraft.com`, including manual reconnects.
+
 ## 0.2.2
 
 - Keep settings and the release cache under `config/odyssey/`.

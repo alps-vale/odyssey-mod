@@ -880,7 +880,10 @@ internal class BridgeClient(
                 }
                 else -> return false
             }
-            return host.removeSuffix(".") == WYNNCRAFT_ADDRESS
+            return when (host.removeSuffix(".")) {
+                WYNNCRAFT_ADDRESS, "lobby.wynncraft.com" -> true
+                else -> false
+            }
         }
         private val NORMAL_DISCONNECT_REASONS = setOf(
             "left_wynncraft",
