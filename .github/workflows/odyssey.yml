@@ -90,16 +90,10 @@ jobs:
 
       - name: Validate and record the remapped artifact
         env:
-          TAG: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          ODYSSEY_VERSION: ${{ steps.release.outputs.version }}
         shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version "$RELEASE_VERSION" --metadata build/libs/release-artifact.json --source-sha "$SHA"
-          else
-            mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --version 0.2.1-SNAPSHOT --metadata build/libs/release-artifact.json --source-sha "$SHA"
-          fi
+        run: mise run --quiet release-artifact --jar build/libs/odyssey-mod.jar --metadata build/libs/release-artifact.json --source-sha "$SHA"
 
       # actions/upload-artifact v7.0.2; action.yml runs on node24.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

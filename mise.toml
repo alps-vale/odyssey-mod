@@ -9,19 +9,27 @@ actionlint = "1.7.12"
 zizmor = "1.30.1"
 
 [env]
-ODYSSEY_BACKEND_URL = "https://odyssey.notes.supply"
+ODYSSEY_BACKEND_URL = { default = "https://odyssey.notes.supply" }
+ODYSSEY_VERSION = { default = "0.2.3-SNAPSHOT" }
+ODYSSEY_DEVELOPMENT = { default = "false" }
+ODYSSEY_PRISM_INSTANCE = { default = "odyssey-testing" }
+PRISM_ROOT = { default = """\
+{% if os() == 'windows' %}{{ env.APPDATA }}\
+{% elif os() == 'macos' %}{{ env.HOME }}/Library/Application Support\
+{% else %}{{ env.HOME }}/.local/share{% endif %}/PrismLauncher""" }
 
 [tasks.default]
 description = "Run the complete local CI check without touching a game instance"
-run = "mise run ci"
+depends = ["ci"]
 
 [tasks.workflow-lint]
 description = "Lint GitHub Actions workflow security and syntax"
-run = "python ci/workflow_lint.py"
+run = ["actionlint .github/workflows/odyssey.yml", "zizmor .github/workflows/odyssey.yml"]
 
 [tasks.test]
-description = "Run Odyssey unit tests against the production backend URL"
-run = "python ci/gradle.py test"
+description = "Run Odyssey unit tests"
+run = "./gradlew test"
+run_windows = "cmd.exe /d /c gradlew.bat test"
 
 [tasks.test-release]
 description = "Test the version/artifact/Discord release helpers without sending a message"
@@ -29,7 +37,8 @@ run = "python ci/test_release.py"
 
 [tasks.build]
 description = "Build and remap Odyssey without installing it into PrismLauncher"
-run = "python ci/gradle.py build"
+run = "./gradlew build"
+run_windows = "cmd.exe /d /c gradlew.bat build"
 
 [tasks.ci]
 description = "Run workflow lint and the complete Gradle build/test graph"
@@ -37,7 +46,8 @@ depends = ["workflow-lint", "test-release", "build-ci"]
 
 [tasks.build-ci]
 description = "Build, test, and bundle compiled cross-platform updater checks"
-run = "python ci/gradle.py ci"
+run = "./gradlew ci"
+run_windows = "cmd.exe /d /c gradlew.bat ci"
 
 [tasks.test-native]
 description = "Run the compiled updater checks without Gradle or Minecraft"

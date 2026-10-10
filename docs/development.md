@@ -8,6 +8,27 @@
 
 These commands do not install or launch Minecraft.
 
+## Repository configuration
+
+`mise.toml` owns tool versions, commands, and build defaults. Gradle/Loom owns
+dependencies, compilation, and remapping; Actions owns runners and publishing.
+For other Gradle commands, use `mise exec -- ./gradlew TASK` (`gradlew.bat` on Windows).
+
+Override local settings in an ignored `mise.local.toml`, for example:
+
+```toml
+[env]
+ODYSSEY_PRISM_INSTANCE = "my-instance"
+PRISM_ROOT = "/path/to/PrismLauncher"
+```
+
+`ODYSSEY_BACKEND_URL` and `ODYSSEY_VERSION` can also be overridden there or in the
+environment. `ODYSSEY_DEVELOPMENT` defaults to `false`; set it to `true` for a development
+build. Release builds take their version from the tag. The `install`, `menu`,
+and `launch` tasks change the configured PrismLauncher instance; the checks do not.
+
+## CI
+
 CI builds the mod and runs the full test suite on Linux. Windows and macOS
 (Apple Silicon and Intel) run compiled updater checks from that build.
 Tools and Gradle state are cached; only `main` writes shared caches.

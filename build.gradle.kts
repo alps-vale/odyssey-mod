@@ -11,16 +11,13 @@ plugins {
 }
 
 group = "org.odyssey"
-version = providers.gradleProperty("mod_version")
-    .orElse(providers.environmentVariable("ODYSSEY_VERSION"))
-    .orElse("0.2.1-SNAPSHOT")
-    .get()
+version = providers.environmentVariable("ODYSSEY_VERSION")
+    .orNull ?: throw GradleException("Run Gradle through Mise to set 'ODYSSEY_VERSION'")
 
-val backendUrl = providers.gradleProperty("backend_url").orNull
-    ?: throw GradleException("The required Gradle property 'backend_url' is missing")
-val developmentBuild = providers.gradleProperty("odyssey_development")
+val backendUrl = providers.environmentVariable("ODYSSEY_BACKEND_URL").orNull
+    ?: throw GradleException("Run Gradle through Mise to set 'ODYSSEY_BACKEND_URL'")
+val developmentBuild = providers.environmentVariable("ODYSSEY_DEVELOPMENT")
     .map(String::toBoolean)
-    .orElse(false)
 val generatedSources = layout.buildDirectory.dir("generated/sources/odyssey/kotlin")
 
 repositories {

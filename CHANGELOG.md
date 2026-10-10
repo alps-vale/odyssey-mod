@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - Keep settings and the release cache under `config/odyssey/`.
 - Shorten the setup guide and move contributor details into separate documentation.
+- Keep build defaults, tool versions, and development commands in Mise.
+
+The old `config/odyssey.json` is no longer read. Set any custom preferences in
+`config/odyssey/config.json`; automatic updates default to on.
 
 ## 0.2.1
 
