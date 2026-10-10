@@ -67,7 +67,8 @@ internal object OdysseyNotifications {
                 false -> "offline in Wynncraft's last report"
                 null -> "Wynncraft status hidden"
             }
-            val versions = member.modVersions.take(3).joinToString(", ") { plain(it, 64) }
+            val versions = member.modVersions.take(3).joinToString(", ") { plain(it, 64) } +
+                (if (member.modVersions.size > 3) " (+${member.modVersions.size - 3} more)" else "")
             val body = Component.literal(plain(member.username, 32)).withStyle(Style.EMPTY.withColor(FROST))
                 .append(Component.literal(" "))
                 .append(if (usePill) RankPillFactory.label(plain(member.guild.prefix, 16), guildColors)

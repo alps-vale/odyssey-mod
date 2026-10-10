@@ -22,6 +22,31 @@ import kotlin.test.assertTrue
 
 class BridgeClientTest {
     @Test
+    fun `queued game thread online result is discarded after a manual reconnect`() {
+        val game = FakeGame()
+        val queued = CopyOnWriteArrayList<() -> Unit>()
+        val delayedGame = object : GameAccess by game {
+            override fun execute(action: () -> Unit) { queued.add(action) }
+        }
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, delayedGame, OdysseyConfig(), ReconnectPolicy { 0 })
+        val results = CopyOnWriteArrayList<Result<GuildOnlineSnapshot>>()
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            eventually { transport.sockets.size == 1 }
+            transport.sendWelcome(0)
+            eventually { client.status() is BridgeStatus.Connected }
+            client.online(results::add)
+            eventually { queued.isNotEmpty() }
+            client.reconnect()
+            queued.forEach { it() }
+            assertTrue(results.isEmpty(), "The report belonged to the socket before reconnect")
+        } finally {
+            client.stop()
+        }
+    }
+
+    @Test
     fun `online report requires a welcomed connection and network failure does not disconnect`() {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }

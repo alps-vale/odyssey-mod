@@ -21,6 +21,7 @@ import java.util.LinkedHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -182,6 +183,7 @@ internal class BridgeClient(
     private var connectionGeneration = 0L
     private var connectionJob: Job? = null
     private var onlineJob: Job? = null
+    private val onlineDisplayEpoch = AtomicLong()
     private val pendingSocketTerminations = IdentityHashMap<BridgeSocket, Command>()
     private val fragments = StringBuilder()
     private var presentationTransfer: PresentationTransfer? = null
@@ -193,6 +195,7 @@ internal class BridgeClient(
     }
 
     fun updateEnvironment(address: String?, playable: Boolean) {
+        onlineDisplayEpoch.incrementAndGet()
         commands.trySend(Command.Environment(address, playable))
     }
 
@@ -203,6 +206,7 @@ internal class BridgeClient(
     }
 
     fun reconnect() {
+        onlineDisplayEpoch.incrementAndGet()
         commands.trySend(Command.Reconnect)
     }
 
@@ -213,6 +217,7 @@ internal class BridgeClient(
     }
 
     fun stop() {
+        onlineDisplayEpoch.incrementAndGet()
         commands.trySend(Command.Stop)
     }
 
@@ -255,7 +260,7 @@ internal class BridgeClient(
                     is Command.OnlineCompleted -> {
                         if (command.socket === socket && welcomed && command.generation == connectionGeneration) {
                             onlineJob = null
-                            game.execute { command.callback(command.result) }
+                            dispatchOnline(command.epoch, command.callback, command.result)
                         }
                     }
                     is Command.ConnectionProgress -> connectionProgress(command)
@@ -341,14 +346,15 @@ internal class BridgeClient(
     }
 
     private fun requestOnline(command: Command.Online) {
+        val epoch = onlineDisplayEpoch.get()
         val current = socket
         val authenticated = session
         if (!welcomed || current == null || authenticated == null || !eligible()) {
-            game.execute { command.callback(Result.failure(IllegalStateException("Connect Odyssey before viewing guild activity."))) }
+            dispatchOnline(epoch, command.callback, Result.failure(IllegalStateException("Connect Odyssey before viewing guild activity.")))
             return
         }
         if (onlineJob != null) {
-            game.execute { command.callback(Result.failure(IllegalStateException("Guild activity is already loading."))) }
+            dispatchOnline(epoch, command.callback, Result.failure(IllegalStateException("Guild activity is already loading.")))
             return
         }
         val generation = connectionGeneration
@@ -360,8 +366,13 @@ internal class BridgeClient(
             } catch (_: Exception) {
                 Result.failure(IllegalStateException("Guild activity is unavailable. Try again shortly."))
             }
-            commands.send(Command.OnlineCompleted(current, generation, command.callback, result))
+            commands.send(Command.OnlineCompleted(current, generation, epoch, command.callback, result))
         }
+    }
+
+    private fun dispatchOnline(epoch: Long, callback: (Result<GuildOnlineSnapshot>) -> Unit, result: Result<GuildOnlineSnapshot>) {
+        // The game thread may drain this after a disconnect or manual reconnect.
+        game.execute { if (onlineDisplayEpoch.get() == epoch) callback(result) }
     }
 
     private suspend fun manualReconnect() {
@@ -872,6 +883,7 @@ internal class BridgeClient(
     }
 
     private fun cancelOnline() {
+        onlineDisplayEpoch.incrementAndGet()
         onlineJob?.cancel()
         onlineJob = null
     }
@@ -898,6 +910,7 @@ internal class BridgeClient(
         data class OnlineCompleted(
             val socket: BridgeSocket,
             val generation: Long,
+            val epoch: Long,
             val callback: (Result<GuildOnlineSnapshot>) -> Unit,
             val result: Result<GuildOnlineSnapshot>,
         ) : Command
