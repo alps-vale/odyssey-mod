@@ -364,25 +364,38 @@ class BridgeClientTest {
         client.stop()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `leaving during socket open cannot resurrect the stale socket`() {
+    fun `leaving during socket open cannot resurrect the stale socket`() = runTest {
         val game = FakeGame()
         val gate = CompletableDeferred<Unit>()
         val transport = FakeTransport { game.identity }.also {
             it.openSocketGate = gate
         }
-        val client = BridgeClient(transport, game, OdysseyConfig(), ReconnectPolicy { 0 })
+        val bridgeJob = SupervisorJob()
+        val client = BridgeClient(
+            transport,
+            game,
+            OdysseyConfig(),
+            ReconnectPolicy { 0 },
+            scope = CoroutineScope(coroutineContext + bridgeJob),
+        )
 
         client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
-        eventually { transport.openSocketCalls.get() == 1 }
+        runCurrent()
+        assertEquals(1, transport.openSocketCalls.get())
         client.updateEnvironment(null, false)
-        eventually { client.status() == BridgeStatus.Idle }
+        runCurrent()
+        assertEquals(BridgeStatus.Idle, client.status())
         assertTrue(transport.sockets.isEmpty())
 
         gate.complete(Unit)
         client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
-        eventually { transport.sockets.size == 1 }
+        runCurrent()
+        assertEquals(1, transport.sockets.size)
         client.stop()
+        runCurrent()
+        assertTrue(bridgeJob.isCancelled)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
