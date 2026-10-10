@@ -1,0 +1,31 @@
+# Development and releases
+
+## Checks
+
+- `mise run ci`: build, test, and lint the workflow.
+- `mise run test`: run the unit tests.
+- `mise run build`: create `build/libs/odyssey-mod.jar`.
+
+These commands do not install or launch Minecraft.
+
+CI builds the mod and runs the full test suite on Linux. Windows and macOS
+(Apple Silicon and Intel) run compiled updater checks from that build.
+Tools and Gradle state are cached; only `main` writes shared caches.
+Superseded PR checks are cancelled. Release jobs publish the tested Linux JAR
+without rebuilding it, after every platform check passes.
+
+## Publishing
+
+Update `CHANGELOG.md`, then push an annotated `vMAJOR.MINOR.PATCH` tag from `main`,
+using that version's changelog as the tag message. CI creates the GitHub release
+and posts the changelog, version download link, and runnable JAR to Discord as Wayfinder.
+
+Repository Actions secrets:
+
+- `DISCORD_RELEASE_WEBHOOK_URL`: webhook for the release channel.
+- `ODYSSEY_UPDATE_SIGNING_KEY`: base64 PKCS#8 Ed25519 private key matching
+  `src/main/resources/odyssey-update.pub`.
+
+Stable releases include `update.manifest` and `update.manifest.sig` for the updater.
+The private key is used only in the signing step. Keep the key stable; changing the
+pinned public key needs a manual client update or a separate key migration.
