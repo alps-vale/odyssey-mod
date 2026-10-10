@@ -1,6 +1,7 @@
 .gradle/
 .kotlin/
 .mise-data/
+mise.local.toml
 __pycache__/
 *.py[cod]
 build/

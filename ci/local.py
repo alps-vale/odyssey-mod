@@ -11,9 +11,8 @@ import urllib.request
 from pathlib import Path
 
 
-BACKEND = os.environ.get("ODYSSEY_BACKEND_URL", "https://odyssey.notes.supply")
-INSTANCE = os.environ.get("ODYSSEY_PRISM_INSTANCE", "odyssey-testing")
-PRISM_ROOT = Path(os.environ.get("PRISM_ROOT", Path.home() / ".local/share/PrismLauncher"))
+INSTANCE = os.environ["ODYSSEY_PRISM_INSTANCE"]
+PRISM_ROOT = Path(os.environ["PRISM_ROOT"])
 MODS = PRISM_ROOT / "instances" / INSTANCE / "minecraft" / "mods"
 DEPENDENCIES = {
     "fabric-api-0.141.6+1.21.11.jar": (

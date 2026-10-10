@@ -449,7 +449,8 @@ def main() -> int:
     version_parser.add_argument("--tag", required=True)
     artifact_parser = commands.add_parser("artifact", help="validate and record a build JAR")
     artifact_parser.add_argument("--jar", required=True)
-    artifact_parser.add_argument("--version", required=True)
+    artifact_parser.add_argument("--version", default=os.environ.get("ODYSSEY_VERSION"),
+                                 required=not os.environ.get("ODYSSEY_VERSION"))
     artifact_parser.add_argument("--metadata", required=True)
     artifact_parser.add_argument("--source-sha", required=True)
     verify_parser = commands.add_parser("verify-artifact", help="verify the promoted artifact")
