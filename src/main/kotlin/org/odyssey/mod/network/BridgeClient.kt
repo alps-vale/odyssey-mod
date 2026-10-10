@@ -213,7 +213,7 @@ internal class BridgeClient(
     fun status(): BridgeStatus = currentStatus
 
     fun online(callback: (Result<GuildOnlineSnapshot>) -> Unit) {
-        commands.trySend(Command.Online(callback))
+        commands.trySend(Command.Online(onlineDisplayEpoch.get(), callback))
     }
 
     fun stop() {
@@ -346,7 +346,8 @@ internal class BridgeClient(
     }
 
     private fun requestOnline(command: Command.Online) {
-        val epoch = onlineDisplayEpoch.get()
+        val epoch = command.epoch
+        if (epoch != onlineDisplayEpoch.get()) return
         val current = socket
         val authenticated = session
         if (!welcomed || current == null || authenticated == null || !eligible()) {
@@ -906,7 +907,7 @@ internal class BridgeClient(
         data class Environment(val address: String?, val playable: Boolean) : Command
         data class Observe(val authorUsername: String, val content: String, val itemShares: List<ItemShare>) : Command
         data object Reconnect : Command
-        data class Online(val callback: (Result<GuildOnlineSnapshot>) -> Unit) : Command
+        data class Online(val epoch: Long, val callback: (Result<GuildOnlineSnapshot>) -> Unit) : Command
         data class OnlineCompleted(
             val socket: BridgeSocket,
             val generation: Long,
