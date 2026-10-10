@@ -30,11 +30,7 @@ ENTRYPOINT_CLASS = "org/odyssey/mod/OdysseyMod.class"
 RECEIPT_NAME = "discord-announcement.json"
 JAR_NAME = "odyssey-mod.jar"
 CHANNEL_ID = "1558187887579627600"
-# This webhook's default icon was verified against the live Wayfinder bot.
-# Use that default: avatar_url copies are not guaranteed to retain the source hash.
-WEBHOOK_ID = "1558190741342392384"
-WAYFINDER_NAME = "Wayfinder"
-WAYFINDER_AVATAR = "2437cfee93d78e6b0d3438c4022331e5"
+BOT_ID = "1533129281956347925"
 COMPONENTS_V2 = 1 << 15
 RUNTIME_REQUIREMENTS = (
     "Minecraft 1.21.11 · Java 21+ · Fabric Loader 0.19.3+ · "
@@ -104,6 +100,10 @@ def validate_jar(path: Path, version: str) -> dict[str, Any]:
     }
 
 
+def utf16_length(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
 def discord_payload(tag: str, body: str, release_url: str, jar_url: str) -> dict[str, Any]:
     """A single ordered card: changelog first, version links and attached JAR last."""
     title = f"## Odyssey {tag} released"
@@ -111,13 +111,12 @@ def discord_payload(tag: str, body: str, release_url: str, jar_url: str) -> dict
     suffix = f"\n\n[Full release notes]({release_url})"
     links = (f"[Download {JAR_NAME}]({jar_url}) · [Release notes]({release_url})\n"
              f"-# {RUNTIME_REQUIREMENTS}")
-    description_limit = 4000 - len(title) - len(links) - len(suffix) - 3
+    description_limit = 4000 - utf16_length(title) - utf16_length(links) - utf16_length(suffix) - 3
     if description_limit < 64:
         raise ReleaseError("Release metadata leaves no room for the Discord changelog.")
-    if len(description) > description_limit:
-        description = description[:description_limit].rstrip() + "…" + suffix
+    if utf16_length(description) > description_limit:
+        description = description.encode("utf-16-le")[:description_limit * 2].decode("utf-16-le", errors="ignore").rstrip() + "…" + suffix
     return {
-        "username": WAYFINDER_NAME,
         "flags": COMPONENTS_V2,
         "allowed_mentions": {"parse": [], "users": [], "roles": []},
         "components": [
@@ -141,7 +140,7 @@ def discord_payload(tag: str, body: str, release_url: str, jar_url: str) -> dict
 def verify_payload(payload: dict[str, Any]) -> None:
     texts = [component["content"] for component in payload["components"][0]["components"]
              if component["type"] == 10]
-    if sum(map(len, texts)) > 4000:
+    if sum(map(utf16_length, texts)) > 4000:
         raise ReleaseError("Discord release card exceeds its text limits.")
     if payload.get("allowed_mentions") != {"parse": [], "users": [], "roles": []}:
         raise ReleaseError("Discord payload does not explicitly suppress all mention parsing.")
@@ -169,44 +168,61 @@ def _request_json(url: str, *, method: str = "GET", data: bytes | None = None,
     request_headers.update(headers or {})
     request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=100) as response:
             return json.loads(response.read())
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-        raise ReleaseError(f"Discord HTTP {method} request failed: {error}") from error
+        raise ReleaseError(f"Publisher HTTP {method} failed ({getattr(error, 'code', 'transport error')}).") from error
 
 
-def _webhook_url() -> str:
-    value = os.environ.get("DISCORD_RELEASE_WEBHOOK_URL", "")
-    parsed = urllib.parse.urlsplit(value)
-    if parsed.scheme != "https" or parsed.hostname != "discord.com":
-        raise ReleaseError("DISCORD_RELEASE_WEBHOOK_URL must be an HTTPS discord.com webhook URL.")
-    return value
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
 
 
-def _discord_message_url(webhook_url: str, message_id: str) -> str:
-    parsed = urllib.parse.urlsplit(webhook_url)
-    base_path = parsed.path.rstrip("/")
+def _oidc_token() -> str:
+    url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+    request_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+    parsed = urllib.parse.urlsplit(url)
+    if (not request_token or parsed.scheme != "https" or not parsed.hostname
+            or not parsed.hostname.endswith(".actions.githubusercontent.com")
+            or parsed.username or parsed.password):
+        raise ReleaseError("GitHub Actions OIDC is unavailable; id-token: write is required.")
+    audience = "https://odyssey.notes.supply/api/v1/automations"
     query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    query = [(key, value) for key, value in query if key != "wait"]
-    return urllib.parse.urlunsplit(
-        (parsed.scheme, parsed.netloc, f"{base_path}/messages/{message_id}",
-         urllib.parse.urlencode(query), "")
+    query = [(key, value) for key, value in query if key != "audience"]
+    query.append(("audience", audience))
+    url = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
+    result = _request_json(url, headers={"Authorization": f"Bearer {request_token}"})
+    token = result.get("value")
+    if not isinstance(token, str) or not token:
+        raise ReleaseError("GitHub Actions did not return an OIDC token.")
+    return token
+
+
+def _publisher_url(tag: str) -> str:
+    endpoint = os.environ.get("ODYSSEY_ANNOUNCEMENTS_URL", "")
+    if endpoint != "https://odyssey.notes.supply/api/v1/automations/releases/messages":
+        raise ReleaseError("ODYSSEY_ANNOUNCEMENTS_URL must name the production bot publisher.")
+    return f"{endpoint}/odyssey-mod:{urllib.parse.quote(tag, safe='')}"
+
+
+def _bot_readback(url: str, token: str) -> dict[str, Any]:
+    result = _request_json(url, headers={"Authorization": f"Bearer {token}"})
+    if not result.get("verified_at") or result.get("author_id") != BOT_ID:
+        raise ReleaseError("Backend receipt has not verified the real bot's message.")
+    return result["message"]
+
+
+def publisher_preflight() -> str:
+    result = _request_json(
+        _publisher_url("ci-preflight") + "?dry_run=true", method="POST",
+        data=json.dumps({"content": "Publisher preflight."}).encode(),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {_oidc_token()}"},
     )
-
-
-def _discord_readback(webhook_url: str, message_id: str) -> dict[str, Any]:
-    return _request_json(_discord_message_url(webhook_url, message_id))
-
-
-def _webhook_channel(webhook_url: str) -> str:
-    metadata = _request_json(webhook_url)
-    channel_id = metadata.get("channel_id")
-    if channel_id != CHANNEL_ID:
-        raise ReleaseError("Configured Discord webhook does not belong to the expected release channel.")
-    if (metadata.get("id") != WEBHOOK_ID or metadata.get("name") != WAYFINDER_NAME
-            or metadata.get("avatar") != WAYFINDER_AVATAR):
-        raise ReleaseError("Configured release webhook does not have the verified Wayfinder identity.")
-    return channel_id
+    if (result.get("dry_run") is not True or result.get("author_id") != BOT_ID
+            or result.get("channel_id") != CHANNEL_ID):
+        raise ReleaseError("Publisher preflight returned a different bot or channel.")
+    return "Wayfinder publisher authenticated and validated without sending a message."
 
 
 def _download(url: str) -> bytes:
@@ -221,8 +237,7 @@ def _download(url: str) -> bytes:
 
 
 def verify_message(message: dict[str, Any], *, expected_jar: bytes,
-                   release_url: str, jar_url: str, tag: str, expected_body: str,
-                   expected_username: str = WAYFINDER_NAME) -> None:
+                   release_url: str, jar_url: str, tag: str, expected_body: str) -> None:
     expected = discord_payload(tag, expected_body, release_url, jar_url)
     cards = message.get("components", [])
     if (not message.get("flags", 0) & COMPONENTS_V2 or message.get("embeds")
@@ -237,12 +252,9 @@ def verify_message(message: dict[str, Any], *, expected_jar: bytes,
                    for actual, wanted in zip(components, expected_components))):
         raise ReleaseError("Discord readback changelog, version links, or component order differs.")
     author = message.get("author", {})
-    if author.get("username") != expected_username:
-        raise ReleaseError("Discord announcement did not use the expected sender name.")
-    if expected_username == WAYFINDER_NAME and (
-            author.get("avatar") != WAYFINDER_AVATAR or author.get("id") != WEBHOOK_ID
-            or message.get("webhook_id") != WEBHOOK_ID):
-        raise ReleaseError("Discord announcement did not use the verified Wayfinder webhook and avatar.")
+    if (author.get("id") != BOT_ID or author.get("bot") is not True
+            or message.get("webhook_id") is not None):
+        raise ReleaseError("Discord announcement did not come from the real Wayfinder bot.")
     if message.get("channel_id") != CHANNEL_ID:
         raise ReleaseError("Discord readback message is not in the configured release channel.")
     if message.get("mention_everyone") is not False or message.get("mentions") or message.get("mention_roles"):
@@ -267,19 +279,21 @@ def verify_message(message: dict[str, Any], *, expected_jar: bytes,
 def receipt_allows_reuse(receipt: dict[str, Any], *, tag: str, source_sha: str,
                          jar_sha: str, notes_sha: str) -> str:
     """Return a sent message ID, or fail closed for every non-reusable receipt."""
-    if (receipt.get("tag") != tag or receipt.get("source_sha") != source_sha
-            or receipt.get("jar_sha256") != jar_sha or receipt.get("notes_sha256") != notes_sha
-            or receipt.get("channel_id") != CHANNEL_ID):
-        raise ReleaseError("Discord receipt belongs to a different build; refusing to announce twice.")
+    _verify_receipt_binding(receipt, tag=tag, source_sha=source_sha, jar_sha=jar_sha, notes_sha=notes_sha)
     if receipt.get("state") == "pending":
-        raise ReleaseError(
-            "Discord announcement receipt is pending with no verified message ID; "
-            "inspect Discord and reconcile it manually before retrying."
-        )
+        raise ReleaseError("Unverified receipt; reconcile the publisher before retrying.")
     message_id = receipt.get("message_id")
     if receipt.get("state") != "sent" or not isinstance(message_id, str) or not message_id:
         raise ReleaseError("Existing Discord receipt has an unknown state; refusing to repost.")
     return message_id
+
+
+def _verify_receipt_binding(receipt: dict[str, Any], *, tag: str, source_sha: str,
+                            jar_sha: str, notes_sha: str) -> None:
+    if (receipt.get("tag") != tag or receipt.get("source_sha") != source_sha
+            or receipt.get("jar_sha256") != jar_sha or receipt.get("notes_sha256") != notes_sha
+            or receipt.get("channel_id") != CHANNEL_ID):
+        raise ReleaseError("Discord receipt belongs to a different build; refusing to announce twice.")
 
 
 def _load_release(repository: str, tag: str) -> dict[str, Any]:
@@ -362,8 +376,8 @@ def announce(tag: str, repository: str, source_sha: str, jar_path: Path) -> str:
     validate_jar(jar_path, version)
     jar_bytes = jar_path.read_bytes()
     jar_sha = hashlib.sha256(jar_bytes).hexdigest()
-    webhook_url = _webhook_url()
-    _webhook_channel(webhook_url)
+    publisher_url = _publisher_url(tag)
+    token = _oidc_token()
     release = _load_release(repository, tag)
     release_url = release["url"]
     _verify_github_jar(repository, tag, jar_bytes, release)
@@ -374,17 +388,25 @@ def announce(tag: str, repository: str, source_sha: str, jar_path: Path) -> str:
     payload = discord_payload(tag, notes_text, release_url, jar_url)
     verify_payload(payload)
     existing = _receipt_asset(repository, tag, release)
-    if existing is not None:
+    if existing is not None and existing.get("state") == "pending":
+        _verify_receipt_binding(existing, tag=tag, source_sha=source_sha, jar_sha=jar_sha, notes_sha=notes_sha)
+        if existing.get("publisher") != "bot-api" or existing.get("publisher_url") != publisher_url:
+            raise ReleaseError("Pending receipt has no matching backend claim; refusing to repost.")
+    elif existing is not None:
         message_id = receipt_allows_reuse(existing, tag=tag, source_sha=source_sha,
                                           jar_sha=jar_sha, notes_sha=notes_sha)
-        message = _discord_readback(webhook_url, message_id)
+        message = _bot_readback(publisher_url, token)
+        if message.get("id") != message_id:
+            raise ReleaseError("Backend message ID differs from the release receipt.")
         verify_message(message, expected_jar=jar_bytes,
                        release_url=release_url, jar_url=jar_url, tag=tag,
                        expected_body=notes_text)
         return f"Verified existing Discord announcement {message_id} (no repost)."
 
     receipt: dict[str, Any] = {
-        "schema": 1,
+        "schema": 2,
+        "publisher": "bot-api",
+        "publisher_url": publisher_url,
         "state": "pending",
         "tag": tag,
         "source_sha": source_sha,
@@ -395,26 +417,22 @@ def announce(tag: str, repository: str, source_sha: str, jar_path: Path) -> str:
     }
     _upload_receipt(repository, tag, receipt)
     content_type, body = _multipart(payload, jar_bytes)
-    parsed = urllib.parse.urlsplit(webhook_url)
-    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    query = [(key, value) for key, value in query if key not in ("wait", "with_components")]
-    query += [("wait", "true"), ("with_components", "true")]
-    execute_url = urllib.parse.urlunsplit(
-        (parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), "")
+    result = _request_json(
+        publisher_url, method="POST", data=body,
+        headers={"Content-Type": content_type, "Authorization": f"Bearer {token}"},
     )
-    posted = _request_json(
-        execute_url,
-        method="POST",
-        data=body,
-        headers={"Content-Type": content_type},
-    )
+    posted = result.get("message", {})
+    if result.get("author_id") != BOT_ID:
+        raise ReleaseError("Publisher did not verify Wayfinder's bot identity.")
     message_id = posted.get("id")
     if not isinstance(message_id, str) or not message_id:
-        raise ReleaseError("Discord execute webhook did not return the created message ID.")
+        raise ReleaseError("Bot publisher did not return the created message ID.")
     verify_message(posted, expected_jar=jar_bytes,
                    release_url=release_url, jar_url=jar_url, tag=tag,
                    expected_body=notes_text)
-    readback = _discord_readback(webhook_url, message_id)
+    readback = _bot_readback(publisher_url, token)
+    if readback.get("id") != message_id:
+        raise ReleaseError("Backend readback returned a different message ID.")
     verify_message(readback, expected_jar=jar_bytes,
                    release_url=release_url, jar_url=jar_url, tag=tag,
                    expected_body=notes_text)
@@ -445,6 +463,7 @@ def command_verify_artifact(args: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("preflight", help="authenticate and validate without publishing")
     version_parser = commands.add_parser("version", help="validate a v-prefixed SemVer tag")
     version_parser.add_argument("--tag", required=True)
     artifact_parser = commands.add_parser("artifact", help="validate and record a build JAR")
@@ -465,7 +484,9 @@ def main() -> int:
     announce_parser.add_argument("--jar", required=True)
     args = parser.parse_args()
     try:
-        if args.command == "version":
+        if args.command == "preflight":
+            print(publisher_preflight())
+        elif args.command == "version":
             print(parse_tag(args.tag))
         elif args.command == "artifact":
             command_artifact(args)

@@ -23,8 +23,6 @@ jobs:
   build:
     name: build (ubuntu-24.04)
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     steps:
       # actions/checkout v7.0.1; action.yml runs on node24.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,6 +103,31 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  publisher-preflight:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        # zizmor: ignore[cache-poisoning] -- Main-only no-send check restores trusted main tools and never saves.
+        with:
+          version: 2026.10.3
+          install_args: --locked python
+          cache: true
+          cache_save: false
+          cache_key: "odyssey-mise-v3-{{version}}-{{platform}}-${{ hashFiles('mise.lock') }}"
+          github_token: ""
+
+      - name: Authenticate publisher without posting
+        run: mise run publisher-preflight
+
   native:
     name: updater (${{ matrix.runner }})
     needs: build
@@ -154,6 +177,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      id-token: write
     steps:
       # actions/checkout v7.0.1; action.yml runs on node24.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -226,7 +250,6 @@ jobs:
 
       - name: Announce release to Discord and verify readback
         env:
-          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
