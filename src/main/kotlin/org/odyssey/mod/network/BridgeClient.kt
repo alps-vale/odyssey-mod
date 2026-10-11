@@ -40,6 +40,7 @@ internal sealed interface BridgeStatus {
         val rank: RankPresentation? = null,
     ) : BridgeStatus
     data class Retrying(val reason: String, val attempt: Int, val delayMillis: Long) : BridgeStatus
+    data class WaitingForLink(val attempt: Int, val delayMillis: Long) : BridgeStatus
     data class Terminal(val code: String, val message: String) : BridgeStatus
 
     fun summary(): String = when (this) {
@@ -51,6 +52,7 @@ internal sealed interface BridgeStatus {
         }
         is Connected -> "connected as $username [$guildPrefix]"
         is Retrying -> "$reason; reconnecting"
+        is WaitingForLink -> "waiting for profile link; connects automatically"
         is Terminal -> "$code: $message"
     }
 }
@@ -62,7 +64,7 @@ internal interface GameAccess {
     fun launcherIdentity(): LauncherIdentity
     fun joinServer(serverId: String)
     fun execute(action: () -> Unit)
-    fun updateStatus(status: BridgeStatus)
+    fun updateStatus(status: BridgeStatus, onDisplayed: (Boolean) -> Unit = {})
     fun showWarning(warning: BridgeWarning)
     fun renderChat(message: ServerMessage.Chat)
 }
@@ -85,12 +87,16 @@ internal class MinecraftGameAccess(
         minecraft.execute(action)
     }
 
-    override fun updateStatus(status: BridgeStatus) {
+    override fun updateStatus(status: BridgeStatus, onDisplayed: (Boolean) -> Unit) {
         minecraft.execute {
+            var displayed = false
             OdysseyDiagnostics.callback("status notification rendering") {
+                val player = minecraft.player ?: return@callback
                 val component = OdysseyNotifications.transition(status) ?: return@callback
-                minecraft.player?.displayClientMessage(component, false)
+                player.displayClientMessage(component, false)
+                displayed = true
             }
+            onDisplayed(displayed)
         }
     }
 
@@ -176,6 +182,9 @@ internal class BridgeClient(
     private var playable = false
     private var welcomed = false
     private var stoppedByTerminalError = false
+    private var waitingForLink = false
+    private var linkNoticePending = false
+    private var linkNoticeDelivery: Any? = null
     private var reconnectAttempt = 0
     private var reconnectScheduled = false
     private var reconnectGeneration = 0L
@@ -280,6 +289,10 @@ internal class BridgeClient(
                     is Command.ConnectionProgress -> connectionProgress(command)
                     is Command.ConnectionSucceeded -> connectionSucceeded(command)
                     is Command.ConnectionFailed -> connectionFailed(command)
+                    is Command.LinkNoticeCompleted -> if (command.delivery === linkNoticeDelivery) {
+                        linkNoticeDelivery = null
+                        if (command.displayed) linkNoticePending = false
+                    }
                     is Command.Text -> text(command)
                     is Command.Binary -> protocolFailure(command.socket, "Binary frame received")
                     is Command.Ping -> if (command.socket === socket) {
@@ -333,11 +346,12 @@ internal class BridgeClient(
             return
         }
         if (socket == null && !stoppedByTerminalError) connectIfEligible()
+        showPendingLinkNotice()
         if (welcomed) send(ClientMessage.ObserverState(PROTOCOL_VERSION, playable))
     }
 
     private suspend fun observation(command: Command.Observe) {
-        if (stoppedByTerminalError) return
+        if (stoppedByTerminalError || waitingForLink) return
         val message = ClientMessage.GuildObservation(
             PROTOCOL_VERSION,
             UUID.randomUUID().toString(),
@@ -399,7 +413,7 @@ internal class BridgeClient(
     }
 
     private fun connectIfEligible() {
-        if (!eligible() || socket != null || connectionJob != null || stoppedByTerminalError) return
+        if (!eligible() || socket != null || connectionJob != null || stoppedByTerminalError || reconnectScheduled) return
         val generation = ++connectionGeneration
         val knownLauncherUuid = launcherUuid
         val knownSession = session
@@ -455,6 +469,8 @@ internal class BridgeClient(
 
     private fun connectionProgress(command: Command.ConnectionProgress) {
         if (command.generation != connectionGeneration || connectionJob == null) return
+        if (waitingForLink && command.stage == BridgeStage.AUTHENTICATING) return
+        if (command.stage == BridgeStage.CONNECTING) waitingForLink = false
         setStatus(BridgeStatus.Progress(command.stage))
     }
 
@@ -470,6 +486,7 @@ internal class BridgeClient(
             return
         }
         connectionJob = null
+        waitingForLink = false
         adoptLauncherIdentity(command.identity)
         session = command.session
         welcomed = false
@@ -740,6 +757,15 @@ internal class BridgeClient(
         val causes = generateSequence(error) { it.cause }.toList()
         val handshake = causes.filterIsInstance<WebSocketHandshakeException>().firstOrNull()
         when {
+            error is TransportException && error.code == "identity_not_linked" -> {
+                if (socket != null) disconnect("identity_not_linked", clearSession = true, clearPresentation = true)
+                session = null
+                pending.clear()
+                clearPresentation()
+                if (!waitingForLink) reconnectAttempt = 0
+                waitingForLink = true
+                scheduleReconnect("waiting for profile link")
+            }
             error is TransportException && (!error.retryable || error.code in TERMINAL_CODES) -> {
                 session = null
                 terminal(error.code, error.message ?: error.code, cause = error)
@@ -768,11 +794,18 @@ internal class BridgeClient(
         socketReason: String? = null,
     ) {
         if (!eligible() || stoppedByTerminalError || reconnectScheduled) return
+        val awaitingLink = waitingForLink
         reconnectScheduled = true
         val attempt = reconnectAttempt + 1
         val delayMillis = reconnectPolicy.delayMillis(reconnectAttempt)
+            .let { if (awaitingLink) maxOf(30_000L, it) else it }
         reconnectAttempt = attempt
         when {
+            awaitingLink -> OdysseyDiagnostics.logger.debug(
+                "[Odyssey Mod] Waiting for profile link attempt={} delayMillis={}",
+                attempt,
+                delayMillis,
+            )
             cause != null -> OdysseyDiagnostics.logger.warn(
                 "[Odyssey Mod] Automatic retry attempt={} delayMillis={} reason={}",
                 attempt,
@@ -795,7 +828,10 @@ internal class BridgeClient(
                 reason,
             )
         }
-        setStatus(BridgeStatus.Retrying(reason, attempt, delayMillis))
+        setStatus(
+            if (awaitingLink) BridgeStatus.WaitingForLink(attempt, delayMillis)
+            else BridgeStatus.Retrying(reason, attempt, delayMillis),
+        )
         val generation = ++reconnectGeneration
         reconnectJob = scope.launch {
             delay(delayMillis)
@@ -846,6 +882,9 @@ internal class BridgeClient(
         cancelConnectionAttempt()
         cancelScheduledReconnect()
         reconnectAttempt = 0
+        waitingForLink = false
+        linkNoticePending = false
+        linkNoticeDelivery = null
         if (reason in NORMAL_DISCONNECT_REASONS) {
             OdysseyDiagnostics.logger.debug("[Odyssey Mod] Bridge disconnected reason={}", reason)
         }
@@ -914,7 +953,24 @@ internal class BridgeClient(
 
     private fun setStatus(value: BridgeStatus) {
         currentStatus = value
-        game.updateStatus(value)
+        if (value is BridgeStatus.WaitingForLink) {
+            if (value.attempt == 1) linkNoticePending = true
+            showPendingLinkNotice()
+        } else {
+            linkNoticePending = false
+            linkNoticeDelivery = null
+            game.updateStatus(value)
+        }
+    }
+
+    private fun showPendingLinkNotice() {
+        if (!playable || !linkNoticePending || linkNoticeDelivery != null) return
+        val status = currentStatus as? BridgeStatus.WaitingForLink ?: return
+        val delivery = Any()
+        linkNoticeDelivery = delivery
+        game.updateStatus(status.copy(attempt = 1)) { displayed ->
+            commands.trySend(Command.LinkNoticeCompleted(delivery, displayed))
+        }
     }
 
     private sealed interface Command {
@@ -930,6 +986,7 @@ internal class BridgeClient(
             val result: Result<GuildOnlineSnapshot>,
         ) : Command
         data class ConnectionProgress(val generation: Long, val stage: BridgeStage) : Command
+        data class LinkNoticeCompleted(val delivery: Any, val displayed: Boolean) : Command
         data class ConnectionSucceeded(
             val generation: Long,
             val identity: LauncherIdentity,

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- Connect automatically after linking your profile while playing Wynncraft, without needing `/odyssey reconnect`.
+- Show one setup notice while waiting for the link, instead of a terminal connection error.
+
 ## 0.3.2
 
 - Show online Alps and Vale members, their guilds and connected Odyssey versions with `/odyssey online` and Wayfinder's `/online`.

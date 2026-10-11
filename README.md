@@ -15,6 +15,7 @@ Fabric API 0.141.6+1.21.11, and Fabric Language Kotlin 1.13.13+kotlin.2.4.10.
 4. Join Wynncraft through any `*.wynncraft.com` address, such as `play.wynncraft.com`
    or `lobby.wynncraft.com`.
    Odyssey connects automatically; send messages through normal guild chat.
+   You can finish linking while already playing; Odyssey checks again automatically.
 
 ## Commands
 
@@ -22,7 +23,7 @@ In Minecraft:
 
 - `/odyssey status`: show the connection and linked identity.
 - `/odyssey online [page]`: show online Alps and Vale members, their guilds, and connected Odyssey versions.
-- `/odyssey reconnect`: reconnect after linking or fixing a connection problem.
+- `/odyssey reconnect`: retry the connection immediately.
 - `/odyssey update`: show update status.
 - `/odyssey update check`: check for a new release.
 - `/odyssey update install`: download the available update for installation when Minecraft closes.

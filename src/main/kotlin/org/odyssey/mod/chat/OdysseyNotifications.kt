@@ -34,6 +34,14 @@ internal object OdysseyNotifications {
         } else {
             null
         }
+        is BridgeStatus.WaitingForLink -> if (status.attempt == 1) {
+            notice(
+                "Link your Minecraft profile with Wayfinder's /link in Discord. Odyssey will connect automatically.",
+                WARNING,
+            )
+        } else {
+            null
+        }
         is BridgeStatus.Connected -> notice(connectedBody(status, " "))
         is BridgeStatus.Terminal -> terminal(status)
     }
@@ -153,6 +161,7 @@ internal object OdysseyNotifications {
         -> NEUTRAL
         is BridgeStatus.Connected -> FROST
         is BridgeStatus.Retrying -> WARNING
+        is BridgeStatus.WaitingForLink -> WARNING
         is BridgeStatus.Terminal -> ERROR
     }
 
