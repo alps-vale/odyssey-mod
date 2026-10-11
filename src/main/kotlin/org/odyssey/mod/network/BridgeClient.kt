@@ -40,6 +40,7 @@ internal sealed interface BridgeStatus {
         val rank: RankPresentation? = null,
     ) : BridgeStatus
     data class Retrying(val reason: String, val attempt: Int, val delayMillis: Long) : BridgeStatus
+    data class WaitingForLink(val attempt: Int, val delayMillis: Long) : BridgeStatus
     data class Terminal(val code: String, val message: String) : BridgeStatus
 
     fun summary(): String = when (this) {
@@ -51,6 +52,7 @@ internal sealed interface BridgeStatus {
         }
         is Connected -> "connected as $username [$guildPrefix]"
         is Retrying -> "$reason; reconnecting"
+        is WaitingForLink -> "waiting for profile link; connects automatically"
         is Terminal -> "$code: $message"
     }
 }
@@ -176,6 +178,7 @@ internal class BridgeClient(
     private var playable = false
     private var welcomed = false
     private var stoppedByTerminalError = false
+    private var waitingForLink = false
     private var reconnectAttempt = 0
     private var reconnectScheduled = false
     private var reconnectGeneration = 0L
@@ -337,7 +340,7 @@ internal class BridgeClient(
     }
 
     private suspend fun observation(command: Command.Observe) {
-        if (stoppedByTerminalError) return
+        if (stoppedByTerminalError || waitingForLink) return
         val message = ClientMessage.GuildObservation(
             PROTOCOL_VERSION,
             UUID.randomUUID().toString(),
@@ -399,7 +402,7 @@ internal class BridgeClient(
     }
 
     private fun connectIfEligible() {
-        if (!eligible() || socket != null || connectionJob != null || stoppedByTerminalError) return
+        if (!eligible() || socket != null || connectionJob != null || stoppedByTerminalError || reconnectScheduled) return
         val generation = ++connectionGeneration
         val knownLauncherUuid = launcherUuid
         val knownSession = session
@@ -455,6 +458,7 @@ internal class BridgeClient(
 
     private fun connectionProgress(command: Command.ConnectionProgress) {
         if (command.generation != connectionGeneration || connectionJob == null) return
+        if (waitingForLink) return
         setStatus(BridgeStatus.Progress(command.stage))
     }
 
@@ -470,6 +474,7 @@ internal class BridgeClient(
             return
         }
         connectionJob = null
+        waitingForLink = false
         adoptLauncherIdentity(command.identity)
         session = command.session
         welcomed = false
@@ -740,6 +745,14 @@ internal class BridgeClient(
         val causes = generateSequence(error) { it.cause }.toList()
         val handshake = causes.filterIsInstance<WebSocketHandshakeException>().firstOrNull()
         when {
+            error is TransportException && error.code == "identity_not_linked" -> {
+                session = null
+                pending.clear()
+                clearPresentation()
+                if (!waitingForLink) reconnectAttempt = 0
+                waitingForLink = true
+                scheduleReconnect("waiting for profile link", awaitingLink = true)
+            }
             error is TransportException && (!error.retryable || error.code in TERMINAL_CODES) -> {
                 session = null
                 terminal(error.code, error.message ?: error.code, cause = error)
@@ -766,13 +779,20 @@ internal class BridgeClient(
         cause: Throwable? = null,
         socketStatus: Int? = null,
         socketReason: String? = null,
+        awaitingLink: Boolean = false,
     ) {
         if (!eligible() || stoppedByTerminalError || reconnectScheduled) return
         reconnectScheduled = true
         val attempt = reconnectAttempt + 1
         val delayMillis = reconnectPolicy.delayMillis(reconnectAttempt)
+            .let { if (awaitingLink) maxOf(30_000L, it) else it }
         reconnectAttempt = attempt
         when {
+            awaitingLink -> OdysseyDiagnostics.logger.debug(
+                "[Odyssey Mod] Waiting for profile link attempt={} delayMillis={}",
+                attempt,
+                delayMillis,
+            )
             cause != null -> OdysseyDiagnostics.logger.warn(
                 "[Odyssey Mod] Automatic retry attempt={} delayMillis={} reason={}",
                 attempt,
@@ -795,7 +815,10 @@ internal class BridgeClient(
                 reason,
             )
         }
-        setStatus(BridgeStatus.Retrying(reason, attempt, delayMillis))
+        setStatus(
+            if (awaitingLink) BridgeStatus.WaitingForLink(attempt, delayMillis)
+            else BridgeStatus.Retrying(reason, attempt, delayMillis),
+        )
         val generation = ++reconnectGeneration
         reconnectJob = scope.launch {
             delay(delayMillis)
@@ -846,6 +869,7 @@ internal class BridgeClient(
         cancelConnectionAttempt()
         cancelScheduledReconnect()
         reconnectAttempt = 0
+        waitingForLink = false
         if (reason in NORMAL_DISCONNECT_REASONS) {
             OdysseyDiagnostics.logger.debug("[Odyssey Mod] Bridge disconnected reason={}", reason)
         }

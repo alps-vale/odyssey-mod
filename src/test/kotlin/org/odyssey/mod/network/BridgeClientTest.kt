@@ -21,6 +21,138 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BridgeClientTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `waiting link checks are bounded and stop when leaving Wynncraft`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        transport.completeFailure = TransportException("identity_not_linked", false, "Not linked")
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            repeat(8) { index ->
+                val status = client.status() as BridgeStatus.WaitingForLink
+                assertEquals(index + 1, status.attempt)
+                assertTrue(status.delayMillis in 30_000L..60_000L)
+                client.observe("Alice", "unlinked chat")
+                client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+                runCurrent()
+                advanceTimeBy(status.delayMillis - 1)
+                runCurrent()
+                assertEquals(index + 1, transport.challengeCalls.get())
+                advanceTimeBy(1)
+                runCurrent()
+            }
+            val attempts = transport.challengeCalls.get()
+            client.updateEnvironment(null, false)
+            runCurrent()
+            transport.completeFailure = null
+            advanceTimeBy(120_000)
+            runCurrent()
+            assertEquals(BridgeStatus.Idle, client.status())
+            assertEquals(attempts, transport.challengeCalls.get())
+            assertTrue(transport.sockets.isEmpty())
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `manual reconnect remains immediate while waiting for a link`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        transport.completeFailure = TransportException("identity_not_linked", false, "Not linked")
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.completeFailure = null
+            client.reconnect()
+            runCurrent()
+            assertEquals(1, transport.sockets.size)
+            transport.sendWelcome(0)
+            runCurrent()
+            advanceTimeBy(60_000)
+            runCurrent()
+            assertEquals(BridgeStatus.Connected("Alice", "Alps"), client.status())
+            assertEquals(2, transport.challengeCalls.get())
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `other authentication rejections stay terminal`() = runTest {
+        for (code in listOf("identity_conflict", "not_in_odyssey", "token_invalid", "protocol_invalid", "invalid_request")) {
+            val game = FakeGame()
+            val transport = FakeTransport { game.identity }
+            transport.completeFailure = TransportException(code, false, "Denied")
+            val client = BridgeClient(
+                transport, game, OdysseyConfig(), ReconnectPolicy { it },
+                scope = CoroutineScope(coroutineContext + SupervisorJob()),
+            )
+            try {
+                client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+                runCurrent()
+                assertEquals(BridgeStatus.Terminal(code, "Denied"), client.status())
+                advanceTimeBy(120_000)
+                runCurrent()
+                assertEquals(1, transport.challengeCalls.get())
+                assertTrue(transport.sockets.isEmpty())
+            } finally {
+                client.stop()
+                runCurrent()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `linking while playing connects automatically without replaying unlinked chat`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        transport.completeFailure = TransportException("identity_not_linked", false, "Not linked")
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertEquals(1, transport.challengeCalls.get())
+            client.observe("Alice", "sent before linking")
+            // Frequent environment and chat updates must not bypass the link-check delay.
+            repeat(20) { client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true) }
+            runCurrent()
+            advanceTimeBy(29_999)
+            runCurrent()
+            assertEquals(1, transport.challengeCalls.get())
+
+            transport.completeFailure = null
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(1, transport.sockets.size, "Linking should not require a reconnect command")
+            transport.sendWelcome(0)
+            runCurrent()
+            assertEquals(BridgeStatus.Connected("Alice", "Alps"), client.status())
+            assertFalse(transport.sockets[0].sent.any { it.contains("sent before linking") })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
     @Test
     fun `rejected activity bearer triggers fresh authentication instead of reusing expired session`() {
         val game = FakeGame()
@@ -968,6 +1100,7 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
     val onlineCalls = AtomicInteger()
     var onlineGate: CompletableDeferred<Unit>? = null
     var onlineFailure: Exception? = null
+    var completeFailure: Exception? = null
 
     override suspend fun online(token: String): GuildOnlineSnapshot {
         onlineCalls.incrementAndGet()
@@ -983,6 +1116,7 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
     }
 
     override suspend fun complete(challengeId: String, username: String): OdysseySession {
+        completeFailure?.let { throw it }
         val current = identity()
         return OdysseySession(
             "token-${challengeCalls.get()}",

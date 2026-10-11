@@ -23,6 +23,23 @@ import kotlin.test.assertTrue
 
 class OdysseyNotificationsTest {
     @Test
+    fun `link setup notice uses Odyssey styling once and promises automatic connection`() {
+        bootstrapMinecraft()
+        val waiting = assertNotNull(
+            OdysseyNotifications.transition(BridgeStatus.WaitingForLink(1, 30_000)),
+        )
+        assertOdysseyPill(waiting)
+        assertTrue("Wayfinder's /link" in waiting.string)
+        assertTrue("connect automatically" in waiting.string)
+        assertTrue("[Reconnect]" !in waiting.string)
+        assertNull(OdysseyNotifications.transition(BridgeStatus.WaitingForLink(2, 30_000)))
+        assertTrue(
+            "waiting for profile link" in
+                OdysseyNotifications.statusReport(BridgeStatus.WaitingForLink(2, 30_000), false).string,
+        )
+    }
+
+    @Test
     fun `online report uses Odyssey styling and distinguishes hidden status from missing connections`() {
         bootstrapMinecraft()
         val snapshot = GuildOnlineSnapshot("2026-10-10T12:00:00Z", listOf(
