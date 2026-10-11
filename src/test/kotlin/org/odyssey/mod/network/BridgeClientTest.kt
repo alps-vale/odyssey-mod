@@ -561,6 +561,44 @@ class BridgeClientTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `unknown management capability before reconnect welcome cannot evict pending chat`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        val gift = GuildEvent.ResourceGifted("Avicia", 1, GuildResource.FISH, "Northbound")
+        val joined = GuildEvent.MemberJoined("NewMember")
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0, capabilities = listOf("guild_events", "guild_management_events"))
+            runCurrent()
+            client.observe("Alice", "pending ordinary chat survives")
+            runCurrent()
+            assertTrue(transport.sockets[0].sent.any { it.contains("pending ordinary chat survives") })
+
+            transport.close(0, 1013, "temporary")
+            runCurrent()
+            advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
+            runCurrent()
+            client.observeEvent(joined)
+            repeat(110) { client.observeEvent(gift) }
+            runCurrent()
+            transport.sendWelcome(1, revision = 2, capabilities = listOf("guild_events"))
+            runCurrent()
+
+            assertTrue(transport.sockets[1].sent.any { it.contains("pending ordinary chat survives") })
+            assertEquals(listOf(joined), transport.sockets[1].sent.decodedEvents().map { it.event })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `events outside Wynncraft are never queued for a later connection`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }
