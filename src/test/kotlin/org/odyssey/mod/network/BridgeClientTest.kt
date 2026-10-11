@@ -167,7 +167,7 @@ class BridgeClientTest {
                 assertTrue(status.delayMillis in 30_000L..60_000L)
                 transport.completeFailure = if (index == 0) IOException("Temporary network error")
                 else TransportException("identity_not_linked", false, "Not linked")
-                client.observe("Alice", "unlinked chat")
+                client.observeOnWynncraft("Alice", "unlinked chat")
                 client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
                 runCurrent()
                 advanceTimeBy(status.delayMillis - 1)
@@ -260,7 +260,7 @@ class BridgeClientTest {
             client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
             runCurrent()
             assertEquals(1, transport.challengeCalls.get())
-            client.observe("Alice", "sent before linking")
+            client.observeOnWynncraft("Alice", "sent before linking")
             // Frequent environment and chat updates must not bypass the link-check delay.
             repeat(20) { client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true) }
             runCurrent()
@@ -402,7 +402,7 @@ class BridgeClientTest {
         )
         client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
         eventually { transport.sockets.size == 1 }
-        client.observe("Alice", "hello")
+        client.observeOnWynncraft("Alice", "hello")
         transport.sendWelcome(0)
         eventually { transport.sockets[0].sent.any { it.contains("guild_observation") } }
         val observation = transport.sockets[0].sent
@@ -478,7 +478,7 @@ class BridgeClientTest {
         transport.sendWelcome(0)
         eventually { client.status() is BridgeStatus.Connected }
         client.observeEvent(GuildEvent.MemberLeft("Alice"))
-        client.observe("Alice", "chat still flows")
+        client.observeOnWynncraft("Alice", "chat still flows")
         eventually { transport.sockets[0].sent.any { it.contains("chat still flows") } }
         assertFalse(transport.sockets[0].sent.any { it.contains("guild_event") }, "older backends never see the frame")
 
@@ -543,7 +543,7 @@ class BridgeClientTest {
             runCurrent()
             transport.sendWelcomeHeader(1, revision = 2, capabilities = listOf("guild_events"))
             runCurrent()
-            client.observe("Alice", "ordinary chat survives")
+            client.observeOnWynncraft("Alice", "ordinary chat survives")
             repeat(110) { client.observeEvent(gift) }
             runCurrent()
             transport.completeSnapshot(1, revision = 2)
@@ -575,7 +575,7 @@ class BridgeClientTest {
             runCurrent()
             transport.sendWelcome(0, capabilities = listOf("guild_events", "guild_management_events"))
             runCurrent()
-            client.observe("Alice", "pending ordinary chat survives")
+            client.observeOnWynncraft("Alice", "pending ordinary chat survives")
             runCurrent()
             assertTrue(transport.sockets[0].sent.any { it.contains("pending ordinary chat survives") })
 
@@ -611,16 +611,17 @@ class BridgeClientTest {
         try {
             client.updateEnvironment("other.example.com", true)
             runCurrent()
-            assertFalse(client.acceptsObservations("other.example.com"))
+            val offServer = client.chatOrigin("other.example.com")
+            assertFalse(client.acceptsObservations(offServer))
             val forged = ItemShare(ItemShareKind.WYNNCRAFT, "[Bow]", "Bow", 0xffffff, "iVBORw0KGgo=")
-            client.observe("Alice", "forged guild chat [Bow]", listOf(forged))
+            client.observe(offServer, "Alice", "forged guild chat [Bow]", listOf(forged))
             runCurrent()
             client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
             runCurrent()
-            assertTrue(client.acceptsObservations(BridgeClient.WYNNCRAFT_ADDRESS))
+            assertTrue(client.acceptsObservations(client.chatOrigin(BridgeClient.WYNNCRAFT_ADDRESS)))
             transport.sendWelcome(0)
             runCurrent()
-            client.observe("Alice", "real guild chat")
+            client.observeOnWynncraft("Alice", "real guild chat")
             runCurrent()
             assertTrue(transport.sockets[0].sent.none { it.contains("forged guild chat") })
             assertTrue(transport.sockets[0].sent.any { it.contains("real guild chat") })
@@ -646,7 +647,7 @@ class BridgeClientTest {
             runCurrent()
             transport.close(0, 1013, "temporary")
             runCurrent()
-            client.observe("Alice", "queued in Alps")
+            client.observeOnWynncraft("Alice", "queued in Alps")
             runCurrent()
             advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
             runCurrent()
@@ -654,6 +655,94 @@ class BridgeClientTest {
             runCurrent()
             assertEquals(BridgeStatus.Connected("Alice", "Vale"), client.status())
             assertTrue(transport.sockets[1].sent.none { it.contains("queued in Alps") })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `delayed item capture never reaches a new guild on the same connection`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0)
+            runCurrent()
+            val seenInAlps = client.chatOrigin(BridgeClient.WYNNCRAFT_ADDRESS)
+            transport.close(0, 1013, "temporary")
+            runCurrent()
+            advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
+            runCurrent()
+            transport.sendWelcome(1, guild = GuildRef("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Vale"))
+            runCurrent()
+            val share = ItemShare(ItemShareKind.WYNNCRAFT, "[Bow]", "Bow", 0xffffff, "iVBORw0KGgo=")
+            client.observe(seenInAlps, "Alice", "delayed Alps item [Bow]", listOf(share))
+            client.observeOnWynncraft("Alice", "seen in Vale")
+            runCurrent()
+            assertTrue(transport.sockets[1].sent.none { it.contains("delayed Alps item") })
+            assertTrue(transport.sockets[1].sent.any { it.contains("seen in Vale") })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `packet-time origin keeps early Wynncraft chat in either command order`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment("other.example.com", true)
+            runCurrent()
+            // The guild packet is handled before the end-of-tick environment update reaches the actor.
+            client.observeOnWynncraft("Alice", "chat before environment")
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            client.observeOnWynncraft("Alice", "chat after environment")
+            runCurrent()
+            transport.sendWelcome(0)
+            runCurrent()
+            assertTrue(transport.sockets[0].sent.any { it.contains("chat before environment") })
+            assertTrue(transport.sockets[0].sent.any { it.contains("chat after environment") })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `off-server chat is refused while the actor still records Wynncraft`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0)
+            runCurrent()
+            client.observe(client.chatOrigin("other.example.com"), "Alice", "seen after leaving")
+            client.updateEnvironment("other.example.com", true)
+            runCurrent()
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(1)
+            runCurrent()
+            assertTrue(transport.sockets.none { socket -> socket.sent.any { it.contains("seen after leaving") } })
         } finally {
             client.stop()
             runCurrent()
@@ -706,7 +795,7 @@ class BridgeClientTest {
             runCurrent()
             transport.sendWelcomeHeader(0, revision = 1)
             runCurrent()
-            client.observe("Alice", "retain this chat")
+            client.observeOnWynncraft("Alice", "retain this chat")
             repeat(110) { client.observeEvent(GuildEvent.MemberJoined("Unsupported")) }
             runCurrent()
             transport.completeSnapshot(0, revision = 1)
@@ -797,7 +886,7 @@ class BridgeClientTest {
             game.statuses.toList(),
         )
 
-        client.observe("Alice", "")
+        client.observeOnWynncraft("Alice", "")
         eventually { game.warnings.size == 1 }
         assertEquals(
             BridgeWarning(
@@ -952,11 +1041,11 @@ class BridgeClientTest {
         transport.sendWelcome(0)
         eventually { client.status() == BridgeStatus.Connected("Alice", "Alps") }
 
-        client.observe("Alice", "queued before terminal")
+        client.observeOnWynncraft("Alice", "queued before terminal")
         eventually { transport.sockets[0].sent.count { it.contains("guild_observation") } == 1 }
         transport.close(0, 4403, "not_in_odyssey")
         eventually { client.status() is BridgeStatus.Terminal }
-        client.observe("Alice", "seen while terminal")
+        client.observeOnWynncraft("Alice", "seen while terminal")
         client.reconnect()
         eventually { transport.sockets.size == 2 }
         transport.sendWelcome(1)
@@ -981,8 +1070,8 @@ class BridgeClientTest {
         transport.sendWelcome(0)
         eventually { client.status() == BridgeStatus.Connected("Alice", "Alps") }
 
-        client.observe("Alice", "first queued observation")
-        client.observe("Alice", "second queued observation")
+        client.observeOnWynncraft("Alice", "first queued observation")
+        client.observeOnWynncraft("Alice", "second queued observation")
         eventually { transport.sockets[0].sent.count { it.contains("guild_observation") } == 2 }
         transport.send(
             0,
@@ -1337,7 +1426,7 @@ class BridgeClientTest {
         eventually { client.status() == BridgeStatus.Connected("Alice", "Alps") }
         transport.sockets[0].failNextSend = IllegalStateException("send failed")
 
-        client.observe("Alice", "failure is observable")
+        client.observeOnWynncraft("Alice", "failure is observable")
 
         eventually { transport.sockets.size == 2 }
         client.stop()
@@ -1518,6 +1607,9 @@ class BridgeClientTest {
         ClientMessage.GuildObservation(PROTOCOL_VERSION, id, "Alice", content)
 
     private fun PendingObservations.chats() = values().filterIsInstance<ClientMessage.GuildObservation>()
+
+    private fun BridgeClient.observeOnWynncraft(author: String, content: String, shares: List<ItemShare> = emptyList()) =
+        observe(chatOrigin(BridgeClient.WYNNCRAFT_ADDRESS), author, content, shares)
 }
 
 private class FakeTransport(private val identity: () -> LauncherIdentity) : OdysseyTransport {
