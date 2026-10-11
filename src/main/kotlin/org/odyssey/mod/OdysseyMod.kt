@@ -145,9 +145,13 @@ object OdysseyMod : ClientModInitializer {
 
     internal fun observeGuildMessage(authorUsername: String, content: String, body: List<Component>) {
         if (!::bridge.isInitialized) return
+        // Bind chat to its packet's server and guild scope: guild-format chat elsewhere is never
+        // rendered or queued, and a delayed item capture cannot reach another guild.
+        val origin = bridge.chatOrigin(Minecraft.getInstance().currentServer?.ip)
+        if (!bridge.acceptsObservations(origin)) return
         val connection = Minecraft.getInstance().connection
         ItemSharing.capture(body, content) { shares ->
-            if (Minecraft.getInstance().connection === connection) bridge.observe(authorUsername, content, shares)
+            if (Minecraft.getInstance().connection === connection) bridge.observe(origin, authorUsername, content, shares)
         }
     }
 

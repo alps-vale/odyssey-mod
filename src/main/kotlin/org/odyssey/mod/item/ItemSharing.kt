@@ -10,14 +10,21 @@ import net.minecraft.world.item.ItemStack
 import org.odyssey.mod.OdysseyDiagnostics
 import org.odyssey.mod.network.ItemShare
 import org.odyssey.mod.network.ItemShareKind
+import org.odyssey.mod.network.MAX_ITEM_NAME_CODE_POINTS
 import org.odyssey.mod.network.MAX_ITEM_SHARES
+import org.odyssey.mod.network.isSafeRemoteText
+import java.util.concurrent.CompletableFuture
 import java.util.regex.Pattern
 import java.util.Optional
 
 internal object ItemSharing {
     private var pendingCaptures = 0
     private val completions = OrderedItemPreviews()
-    private val wynntils by lazy { runCatching { WynntilsAccess() }.getOrNull() }
+    private val wynntils by lazy {
+        runCatching { WynntilsAccess() }.onFailure {
+            OdysseyDiagnostics.logger.warn("[Odyssey Mod] Installed Wynntils cannot decode shared items", it)
+        }.getOrNull()
+    }
 
     fun capture(body: List<Component>, content: String, complete: (List<ItemShare>) -> Unit) {
         val items = LinkedHashMap<String, SharedStack>()
@@ -26,36 +33,32 @@ internal object ItemSharing {
                 OdysseyDiagnostics.logger.debug("[Odyssey Mod] Item decoding unavailable", it)
             }.getOrNull()?.forEach { items.putIfAbsent(it.encoded, it) }
         }
-        body.forEach { collectNative(it, content, items) }
+        // Game-supplied components must never stop the chat itself from being observed.
+        runCatching { body.forEach { collectNative(it, content, items) } }.onFailure {
+            OdysseyDiagnostics.logger.debug("[Odyssey Mod] Native item preview unavailable", it)
+        }
         val selected = items.values.take(MAX_ITEM_SHARES)
         val fallback = selected.map { it.preview(null) }
         val finish = completions.begin(fallback, complete)
-        if (selected.isEmpty()) {
-            finish(emptyList())
-            return
-        }
-        if (pendingCaptures >= 2) {
+        if (selected.isEmpty() || pendingCaptures >= 2) {
             finish(fallback)
             return
         }
         pendingCaptures += 1
-        val previews = ArrayList<ItemShare>()
-        fun next(index: Int) {
-            if (index == selected.size) {
-                pendingCaptures -= 1
-                finish(previews)
-                return
-            }
-            val item = selected[index]
-            TooltipCapture.capture(item.stack).whenComplete { png, error ->
-                Minecraft.getInstance().execute {
-                    if (error != null) OdysseyDiagnostics.logger.debug("[Odyssey Mod] Tooltip image unavailable", error)
-                    previews.add(item.preview(png))
-                    next(index + 1)
-                }
+        // Each capture times out on its own, so rendering them together bounds the wait for
+        // this message, and the guild chat ordered behind it, to one capture deadline.
+        val captures = selected.map { item ->
+            TooltipCapture.capture(item.stack).exceptionally {
+                OdysseyDiagnostics.logger.debug("[Odyssey Mod] Tooltip image unavailable", it)
+                null
             }
         }
-        next(0)
+        CompletableFuture.allOf(*captures.toTypedArray()).whenComplete { _, _ ->
+            Minecraft.getInstance().execute {
+                pendingCaptures -= 1
+                finish(selected.zip(captures) { item, capture -> item.preview(capture.join()) })
+            }
+        }
     }
 
     private fun collectNative(component: Component, content: String, items: MutableMap<String, SharedStack>) {
@@ -66,7 +69,7 @@ internal object ItemSharing {
             if (items.values.any { it.kind == ItemShareKind.WYNNTILS && it.encoded == reference }) return
             val stack = hover.item.copy()
             val name = stack.hoverName.string
-            if (name.isNotEmpty() && name.codePointCount(0, name.length) <= 128 && !name.any(Char::isISOControl)) {
+            if (isSafeRemoteText(name, MAX_ITEM_NAME_CODE_POINTS)) {
                 if (items.values.none { it.encoded == reference && ItemStack.isSameItemSameComponents(it.stack, stack) }) {
                     items["native-${items.size}"] = SharedStack(reference, name, ItemShareKind.WYNNCRAFT, stack)
                 }
@@ -123,9 +126,7 @@ internal object ItemSharing {
                     val item = result.javaClass.getMethod("getValue").invoke(result)
                     if (!namedItem.isInstance(item)) return@runCatching null
                     val name = getName.invoke(item) as String
-                    if (name.isEmpty() || name.codePointCount(0, name.length) > 128 || name.any(Char::isISOControl)) {
-                        return@runCatching null
-                    }
+                    if (!isSafeRemoteText(name, MAX_ITEM_NAME_CODE_POINTS)) return@runCatching null
                     val stack = fakeStack.newInstance(item, "From chat") as ItemStack
                     val color = if (tierItem.isInstance(item)) {
                         val tier = getTier.invoke(item)

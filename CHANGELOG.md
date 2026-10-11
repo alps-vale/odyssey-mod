@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.7
+
+- Ignore guild-style chat seen on other servers instead of sending it to Discord after you rejoin Wynncraft.
+- Keep guild chat moving when an item preview is slow or fails to render.
+- Drop unsent guild chat, including item previews still rendering, when you reconnect as a member of another guild.
+
 ## 0.3.6
 
 - Forward scheduled guild tributes and resource gifts to Discord, including incoming gifts from allies.

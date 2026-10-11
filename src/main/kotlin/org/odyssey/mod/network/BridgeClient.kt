@@ -59,6 +59,9 @@ internal sealed interface BridgeStatus {
 
 internal data class BridgeWarning(val code: String, val message: String)
 
+/** Where guild chat was seen, and the queued-chat scope current when its packet arrived. */
+internal data class ChatOrigin(val address: String?, val scope: Long)
+
 internal data class LauncherIdentity(val uuid: String, val username: String)
 internal interface GameAccess {
     fun launcherIdentity(): LauncherIdentity
@@ -197,6 +200,8 @@ internal class BridgeClient(
     private var connectionJob: Job? = null
     private var onlineJob: Job? = null
     private val onlineDisplayEpoch = AtomicLong()
+    // Advances whenever queued chat leaves its guild or identity, so later captures cannot cross.
+    private val chatScope = AtomicLong()
     private val pendingSocketTerminations = IdentityHashMap<BridgeSocket, Command>()
     private val fragments = StringBuilder()
     private var presentationTransfer: PresentationTransfer? = null
@@ -212,10 +217,10 @@ internal class BridgeClient(
         commands.trySend(Command.Environment(address, playable))
     }
 
-    fun observe(authorUsername: String, content: String, itemShares: List<ItemShare> = emptyList()) {
+    fun observe(origin: ChatOrigin, authorUsername: String, content: String, itemShares: List<ItemShare> = emptyList()) {
         // Keep control messages reliable, but do not queue unbounded image bytes behind them.
         val shares = if (queuedObservations.incrementAndGet() > 16) itemShares.map { it.copy(png = null) } else itemShares
-        if (commands.trySend(Command.Observe(authorUsername, content, shares)).isFailure) queuedObservations.decrementAndGet()
+        if (commands.trySend(Command.Observe(origin, authorUsername, content, shares)).isFailure) queuedObservations.decrementAndGet()
     }
 
     fun observeEvent(event: GuildEvent) {
@@ -228,6 +233,14 @@ internal class BridgeClient(
     }
 
     fun status(): BridgeStatus = currentStatus
+
+    /** Captures guild chat's server and queued-chat scope when its packet arrives. */
+    fun chatOrigin(address: String?): ChatOrigin = ChatOrigin(address, chatScope.get())
+
+    /** Whether chat from [origin] could be sent, so its item images are worth rendering. */
+    fun acceptsObservations(origin: ChatOrigin): Boolean =
+        fromWynncraft(origin) &&
+            currentStatus !is BridgeStatus.Terminal && currentStatus !is BridgeStatus.WaitingForLink
 
     fun online(callback: (Result<GuildOnlineSnapshot>) -> Unit) {
         commands.trySend(Command.Online(onlineDisplayEpoch.get(), callback))
@@ -360,7 +373,11 @@ internal class BridgeClient(
     }
 
     private fun observation(command: Command.Observe) {
-        if (stoppedByTerminalError || waitingForLink) return
+        // The packet-time origin decides: the end-of-tick environment update can still be queued
+        // behind early chat, and a delayed item capture must not cross into another guild.
+        if (!fromWynncraft(command.origin) || command.origin.scope != chatScope.get() ||
+            stoppedByTerminalError || waitingForLink
+        ) return
         submit(
             ClientMessage.GuildObservation(
                 PROTOCOL_VERSION,
@@ -577,8 +594,14 @@ internal class BridgeClient(
                     return
                 }
                 welcomed = false
-                if (observationGuildUuid != message.guild.uuid) {
-                    pending.removeIf { it is ClientMessage.GuildEventObservation }
+                when (observationGuildUuid) {
+                    message.guild.uuid -> Unit
+                    // Chat queued before any Welcome has no known guild; the backend checks its author.
+                    null -> pending.removeIf { it is ClientMessage.GuildEventObservation }
+                    else -> {
+                        pending.clear()
+                        chatScope.incrementAndGet()
+                    }
                 }
                 observationGuildUuid = message.guild.uuid
                 guildEvents = GUILD_EVENTS_CAPABILITY in message.capabilities
@@ -939,6 +962,7 @@ internal class BridgeClient(
         launcherUuid = null
         observationGuildUuid = null
         pending.clear()
+        chatScope.incrementAndGet()
         seenEvents.clear()
         PresentationRepository.replace(PresentationSnapshot())
     }
@@ -986,6 +1010,8 @@ internal class BridgeClient(
 
     private fun eligible(): Boolean = config.autoConnect && isWynncraftAddress(serverAddress)
 
+    private fun fromWynncraft(origin: ChatOrigin): Boolean = config.autoConnect && isWynncraftAddress(origin.address)
+
     private fun setStatus(value: BridgeStatus) {
         currentStatus = value
         if (value is BridgeStatus.WaitingForLink) {
@@ -1010,7 +1036,12 @@ internal class BridgeClient(
 
     private sealed interface Command {
         data class Environment(val address: String?, val playable: Boolean) : Command
-        data class Observe(val authorUsername: String, val content: String, val itemShares: List<ItemShare>) : Command
+        data class Observe(
+            val origin: ChatOrigin,
+            val authorUsername: String,
+            val content: String,
+            val itemShares: List<ItemShare>,
+        ) : Command
         data class ObserveEvent(val event: GuildEvent) : Command
         data object Reconnect : Command
         data class Online(val epoch: Long, val callback: (Result<GuildOnlineSnapshot>) -> Unit) : Command
