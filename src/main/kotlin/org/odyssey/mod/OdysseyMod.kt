@@ -152,7 +152,9 @@ object OdysseyMod : ClientModInitializer {
     }
 
     internal fun observeGuildEvent(event: GuildEvent) {
-        if (::bridge.isInitialized) bridge.observeEvent(event)
+        if (::bridge.isInitialized && BridgeClient.isWynncraftAddress(Minecraft.getInstance().currentServer?.ip)) {
+            bridge.observeEvent(event)
+        }
     }
 
     private fun tick(minecraft: Minecraft) {

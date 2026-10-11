@@ -182,6 +182,8 @@ internal class BridgeClient(
     private var playable = false
     private var welcomed = false
     private var guildEvents = false
+    private var guildEventCapabilityKnown = false
+    private var observationGuildUuid: String? = null
     private var stoppedByTerminalError = false
     private var waitingForLink = false
     private var linkNoticePending = false
@@ -371,7 +373,7 @@ internal class BridgeClient(
 
     private fun eventObservation(command: Command.ObserveEvent) {
         // Backends without the capability would reject the frame as a protocol violation.
-        if (stoppedByTerminalError || waitingForLink || (welcomed && !guildEvents)) return
+        if (!eligible() || stoppedByTerminalError || waitingForLink || observationGuildUuid == null || (guildEventCapabilityKnown && !guildEvents)) return
         submit(ClientMessage.GuildEventObservation(PROTOCOL_VERSION, UUID.randomUUID().toString(), command.event))
     }
 
@@ -507,6 +509,7 @@ internal class BridgeClient(
         adoptLauncherIdentity(command.identity)
         session = command.session
         welcomed = false
+        guildEventCapabilityKnown = false
         fragments.clear()
         presentationTransfer = null
         val termination = pendingSocketTerminations.remove(command.socket)
@@ -568,7 +571,12 @@ internal class BridgeClient(
                     return
                 }
                 welcomed = false
+                if (observationGuildUuid != message.guild.uuid) {
+                    pending.removeIf { it is ClientMessage.GuildEventObservation }
+                }
+                observationGuildUuid = message.guild.uuid
                 guildEvents = GUILD_EVENTS_CAPABILITY in message.capabilities
+                guildEventCapabilityKnown = true
                 presentationTransfer = PresentationTransfer(
                     revision = message.presentationRevision,
                     identityUuid = message.identity.uuid,
@@ -922,6 +930,7 @@ internal class BridgeClient(
     private fun invalidateIdentity() {
         session = null
         launcherUuid = null
+        observationGuildUuid = null
         pending.clear()
         seenEvents.clear()
         PresentationRepository.replace(PresentationSnapshot())

@@ -518,6 +518,111 @@ class BridgeClientTest {
         mapNotNull { runCatching { ProtocolCodec.decodeClient(ProtocolFrame.Text(it)) }.getOrNull() }
             .filterIsInstance<ClientMessage.GuildEventObservation>()
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `events outside Wynncraft are never queued for a later connection`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0, capabilities = listOf("guild_events"))
+            runCurrent()
+            client.updateEnvironment("other.example.com", true)
+            runCurrent()
+            repeat(110) { client.observeEvent(GuildEvent.MemberJoined("Spoofed")) }
+            runCurrent()
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(1, capabilities = listOf("guild_events"))
+            runCurrent()
+            assertTrue(transport.sockets[1].sent.decodedEvents().isEmpty())
+            client.observeEvent(GuildEvent.MemberJoined("RealMember"))
+            runCurrent()
+            assertEquals(listOf(GuildEvent.MemberJoined("RealMember")), transport.sockets[1].sent.decodedEvents().map { it.event })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `known unsupported events cannot evict chat during presentation synchronization`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcomeHeader(0, revision = 1)
+            runCurrent()
+            client.observe("Alice", "retain this chat")
+            repeat(110) { client.observeEvent(GuildEvent.MemberJoined("Unsupported")) }
+            runCurrent()
+            transport.completeSnapshot(0, revision = 1)
+            runCurrent()
+            assertTrue(transport.sockets[0].sent.any { it.contains("retain this chat") })
+            assertTrue(transport.sockets[0].sent.decodedEvents().isEmpty())
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `guild event backlog never crosses guilds after reconnect`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            client.observeEvent(GuildEvent.MemberJoined("BeforeWelcome"))
+            transport.sendWelcome(0, capabilities = listOf("guild_events"))
+            runCurrent()
+            assertTrue(transport.sockets[0].sent.decodedEvents().isEmpty())
+            client.observeEvent(GuildEvent.MemberLeft("AlpsMember"))
+            runCurrent()
+            assertEquals(1, transport.sockets[0].sent.decodedEvents().size)
+
+            transport.close(0, 1013, "temporary")
+            runCurrent()
+            client.observeEvent(GuildEvent.MemberJoined("QueuedInAlps"))
+            runCurrent()
+            advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
+            runCurrent()
+            transport.sendWelcome(
+                1,
+                capabilities = listOf("guild_events"),
+                guild = GuildRef("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Vale"),
+            )
+            runCurrent()
+            assertEquals(BridgeStatus.Connected("Alice", "Vale"), client.status())
+            assertTrue(transport.sockets[1].sent.decodedEvents().isEmpty(), "Alps events must not replay in Vale")
+            client.observeEvent(GuildEvent.MemberJoined("ValeMember"))
+            runCurrent()
+            assertEquals(
+                listOf(GuildEvent.MemberJoined("ValeMember")),
+                transport.sockets[1].sent.decodedEvents().map { it.event },
+            )
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
     @Test
     fun `reports typed lifecycle warnings and terminal state without overwriting connection`() {
         val game = FakeGame()
@@ -1326,8 +1431,9 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
         revision: Long = 1,
         entries: List<PresentationEntry> = emptyList(),
         capabilities: List<String> = listOf("guild_observation", "presentation"),
+        guild: GuildRef = GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps"),
     ) {
-        sendWelcomeHeader(index, revision, capabilities)
+        sendWelcomeHeader(index, revision, capabilities, guild)
         entries.forEach { sendSnapshotEntry(index, revision, it) }
         completeSnapshot(index, revision)
     }
@@ -1337,6 +1443,7 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
         index: Int,
         revision: Long,
         capabilities: List<String> = listOf("guild_observation", "presentation"),
+        guild: GuildRef = GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps"),
     ) {
         // Real WebSockets deliver frames only after the client requests demand.
         eventually { sockets[index].requests > 0 }
@@ -1344,7 +1451,7 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
         val welcome = ServerMessage.Welcome(
             PROTOCOL_VERSION,
             MinecraftIdentity(current.uuid, current.username),
-            GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps"),
+            guild,
             capabilities,
             revision,
         )
