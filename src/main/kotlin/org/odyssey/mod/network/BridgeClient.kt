@@ -375,8 +375,8 @@ internal class BridgeClient(
     private fun eventObservation(command: Command.ObserveEvent) {
         // Backends without the capability would reject the frame as a protocol violation.
         if (!eligible() || stoppedByTerminalError || waitingForLink || observationGuildUuid == null || (guildEventCapabilityKnown && !supportsEvent(command.event))) return
-        // Reconnects retain the guild, but management support must be learned on this connection.
-        if (command.event.requiresManagementCapability() && !guildEventCapabilityKnown) return
+        // Reconnects retain the guild, but management support requires a live, negotiated socket.
+        if (command.event.requiresManagementCapability() && (socket == null || !guildEventCapabilityKnown)) return
         submit(ClientMessage.GuildEventObservation(PROTOCOL_VERSION, UUID.randomUUID().toString(), command.event))
     }
 

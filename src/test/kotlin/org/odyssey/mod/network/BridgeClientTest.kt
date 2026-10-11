@@ -581,6 +581,8 @@ class BridgeClientTest {
 
             transport.close(0, 1013, "temporary")
             runCurrent()
+            repeat(110) { client.observeEvent(gift) }
+            runCurrent()
             advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
             runCurrent()
             client.observeEvent(joined)
