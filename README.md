@@ -26,8 +26,8 @@ In Minecraft:
 - `/odyssey reconnect`: retry the connection immediately.
 - `/odyssey update`: show update status.
 - `/odyssey update check`: check for a new release.
-- `/odyssey update install`: download the available update for installation when Minecraft closes.
-- `/odyssey update auto on` or `off`: enable or disable automatic updates.
+- `/odyssey update download`: download the available update for installation when Minecraft closes.
+- `/odyssey update checks on` or `off`: enable or disable automatic update checks.
 
 If the bridge stays disconnected, check your linked profile and guild role,
 then run `/odyssey reconnect`.
@@ -46,22 +46,26 @@ with a readable item label. Only the tooltip is rendered—never your screen.
 
 ## Updates
 
-Automatic updates are on by default. Odyssey checks for stable releases at most
-once a day and installs updates when Minecraft closes. Use `/odyssey update auto off`
-to opt out; the setting is saved. You can still check and install updates manually.
+Odyssey checks for stable releases at startup and about every 30 minutes while
+Minecraft is running. A new version gets one chat prompt. Click **Download** or
+run `/odyssey update download` to download it; no update JAR is downloaded or
+installed without your approval. The update installs after Minecraft closes.
+
+Use `/odyssey update checks off` to disable automatic checks; the setting is saved.
+Manual checks and downloads still work. Checks fetch only public release metadata,
+without account identifiers, and back off if the release host is unavailable.
 
 Updates work on Windows, Linux, and macOS. Odyssey verifies the release signature,
 JAR, and required dependencies before replacing the installed mod.
 
 If Minecraft cannot start, close it and replace the Odyssey JAR manually.
-For a failed update, use `/odyssey update install` to retry. To roll back, close
+For a failed update, use `/odyssey update download` to retry. To roll back, close
 Minecraft and copy `mods/.odyssey-update/previous.jar` over the installed Odyssey JAR.
-Automatic updates pause after a rollback; `/odyssey update auto on` resumes them.
 
 ## Settings
 
 Settings live in `config/odyssey/config.json`. `autoConnect`, `bridgeVisible`,
-`discordRankOverrides`, and `autoUpdate` default to `true`.
+`discordRankOverrides`, and `checkUpdates` default to `true`.
 Close Minecraft before editing the file. The `updates/` subfolder holds the release cache.
 
 ## Development

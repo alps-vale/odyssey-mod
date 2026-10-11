@@ -59,7 +59,7 @@ public record UpdateManifest(String version, URI jarUrl, long size, String sha25
             throw new IOException("Unsupported update manifest");
         String version = fields.get("version");
         if (!version.matches("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)"))
-            throw new IOException("Only stable releases can be installed automatically");
+            throw new IOException("Only stable releases are supported");
         URI url;
         long size;
         try {

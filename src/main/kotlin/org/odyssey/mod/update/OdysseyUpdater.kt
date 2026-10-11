@@ -1,209 +1,182 @@
 package org.odyssey.mod.update
 
-import net.fabricmc.loader.api.FabricLoader
-import net.fabricmc.loader.api.metadata.ModOrigin
 import org.odyssey.mod.OdysseyDiagnostics
 import org.odyssey.mod.config.OdysseyConfig
-import java.net.URI
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 
 internal data class UpdateNotice(val text: String, val action: Action? = null, val warning: Boolean = false) {
-    enum class Action { INSTALL, RELEASES }
+    sealed interface Action {
+        data class Download(val version: String) : Action
+        data object Releases : Action
+    }
 }
 
-/** Release work runs off the game thread; explicit preferences are persisted immediately. */
+/** Checks only offer releases. Downloading always requires an explicit user action. */
 internal class OdysseyUpdater(
     private val version: String,
     private var config: OdysseyConfig,
     private val notify: (UpdateNotice) -> Unit,
-    private val worker: ExecutorService = Executors.newSingleThreadExecutor { task ->
+    private val files: UpdateFiles = FabricUpdateFiles(),
+    private val worker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "Odyssey updates").apply { isDaemon = true }
     },
     private val saveConfig: (OdysseyConfig) -> Unit = OdysseyConfig::save,
 ) {
-    private val loader = FabricLoader.getInstance()
-    private val target = installedJar()
-    private val cache by lazy { UpdateCache(OdysseyConfig.directory.resolve("updates")) }
-    private val transport = UpdateTransport()
     private val queued = AtomicInteger()
-    private var candidate: Candidate? = null
-    private var rollbackPaused = false
-    @Volatile private var automatic = config.autoUpdate
+    private val scheduling = Any()
+    private var nextCheck: ScheduledFuture<*>? = null
+    private var failures = 0
+    private var candidate: VerifiedUpdate? = null
+    private val announced = mutableSetOf<String>()
+    @Volatile private var checksEnabled = config.checkUpdates
+    @Volatile private var closed = false
     @Volatile var status = "Updates have not been checked yet."
         private set
 
-    fun start() = submit(false) {
-        rollbackPaused = target?.let(UpdateApplier::wasRolledBack) ?: false
-        if (rollbackPaused && automatic)
-            notify(UpdateNotice("Automatic updates paused after a rollback. Use /odyssey update auto on to resume.",
-                warning = true))
-        if (pendingState() == UpdateApplier.PendingState.PENDING) {
-            // Don't endlessly retry a failed transaction. A user can request another attempt.
-            status = "The last update was not installed. Use /odyssey update install to retry."
-            notify(UpdateNotice(status, warning = true))
+    fun start() = submit(false, automaticRun = true) {
+        val pending = files.pending()
+        if (pending != null) {
+            status = "The last update was not installed. Click Download to retry."
+            notify(UpdateNotice(status, UpdateNotice.Action.Download(pending.manifest.version()), true))
         } else {
-            target?.let { jar ->
-                val receipt = UpdateApplier.directory(jar).resolve("installed.txt")
-                if (Files.exists(receipt)) {
-                    val installed = Files.readString(receipt).trim()
-                    if (installed == version) notify(UpdateNotice("Odyssey $version is installed."))
-                    Files.delete(receipt)
-                }
-            }
-            checkRelease(false)
+            if (files.consumeInstalledVersion() == version)
+                notify(UpdateNotice("Odyssey $version is installed."))
+            if (checksEnabled) checkRelease(false)
         }
     }
 
     fun check() = submit(true) { checkRelease(true) }
 
-    fun install() = submit(true) {
-        val jar = target ?: error("This instance needs a manual update.")
-        val directory = UpdateApplier.directory(jar)
-        if (pendingState() == UpdateApplier.PendingState.PENDING) {
-            // This also covers recovery after Minecraft/helper was killed before installation.
-            val manifest = UpdateManifest.verify(UpdateManifest.readLimited(directory.resolve("update.manifest"), UpdateManifest.MAX_MANIFEST),
-                UpdateManifest.readLimited(directory.resolve("update.manifest.sig"), 64), UpdateManifest.releaseKey())
-            require(UpdateCompatibility.missing(manifest, installedVersions()) == null)
-            launchHelper(jar)
-            stagedNotice(manifest.version())
-        } else {
-            if (candidate == null) checkRelease(true, installAutomatic = false)
-            candidate?.let { stage(jar, it) }
-                ?: notify(UpdateNotice("No compatible update is available."))
+    /** A chat button includes its offered version, so stale buttons cannot select another release. */
+    fun download(expectedVersion: String? = null) = submit(true) {
+        if (!files.canDownload) {
+            notify(UpdateNotice("This instance needs a manual update.", UpdateNotice.Action.Releases))
+            return@submit
+        }
+        val pending = files.pending()
+        if (pending == null && candidate == null) checkRelease(true)
+        val release = pending ?: candidate
+        if (release == null) {
+            notify(UpdateNotice("No compatible update is available."))
+            return@submit
+        }
+        if (expectedVersion != null && release.manifest.version() != expectedVersion) {
+            notify(UpdateNotice("That update offer has changed. Run /odyssey update check for the current version."))
+            return@submit
+        }
+        val missing = files.missing(release)
+        if (missing != null) {
+            notify(UpdateNotice("Odyssey ${release.manifest.version()} needs $missing. Update your instance first.",
+                UpdateNotice.Action.Releases, true))
+            return@submit
+        }
+        notify(UpdateNotice("Downloading Odyssey ${release.manifest.version()}…"))
+        if (files.download(release) { !closed }) {
+            status = "Odyssey ${release.manifest.version()} will install when Minecraft closes."
+            notify(UpdateNotice(status))
         }
     }
 
-    fun setAutomatic(enabled: Boolean) {
-        // Cancel in-flight automatic work before saving; a daemon cannot defer this preference.
-        if (!enabled) automatic = false
-        val next = config.copy(autoUpdate = enabled)
+    fun setChecks(enabled: Boolean) {
+        // Persist an opt-out even while the background worker is occupied.
+        if (!enabled) checksEnabled = false
+        synchronized(scheduling) { nextCheck?.cancel(false); nextCheck = null }
+        val next = config.copy(checkUpdates = enabled)
         try { saveConfig(next) }
         catch (error: Exception) {
             OdysseyDiagnostics.logger.warn("[Odyssey Mod] Could not save update preference", error)
             notify(UpdateNotice(if (enabled) "Couldn't save the update setting. Try again."
-                else "Automatic updates are disabled for this session, but the setting couldn't be saved. Try again.",
+                else "Update checks are disabled for this session, but the setting couldn't be saved. Try again.",
                 warning = true))
+            if (checksEnabled) scheduleNext()
             return
         }
         config = next
-        automatic = enabled
-        notify(UpdateNotice(if (enabled) "Automatic updates enabled. Updates install when Minecraft closes."
-            else "Automatic updates disabled."))
-        if (!enabled) return
-        submit(true, queue = true) {
-            if (!automatic) return@submit
-            target?.let(UpdateApplier::acknowledgeRollback)
-            rollbackPaused = false
-            checkRelease(true)
+        checksEnabled = enabled
+        notify(UpdateNotice(if (enabled) "Automatic update checks enabled. Downloads still need your approval."
+            else "Automatic update checks disabled."))
+        if (enabled) submit(false, queue = true, automaticRun = true) {
+            if (checksEnabled) checkRelease(false)
         }
     }
 
-    private fun checkRelease(manual: Boolean, installAutomatic: Boolean = true) {
-        if (pendingState() == UpdateApplier.PendingState.PENDING) {
-            if (manual) notify(UpdateNotice(status))
+    fun stop() {
+        synchronized(scheduling) {
+            closed = true
+            nextCheck?.cancel(false)
+            nextCheck = null
+            worker.shutdownNow()
+        }
+    }
+
+    private fun checkRelease(manual: Boolean) {
+        val pending = files.pending()
+        if (pending != null) {
+            if (manual) notify(UpdateNotice("Odyssey ${pending.manifest.version()} is already downloaded. Click Download to retry installation.",
+                UpdateNotice.Action.Download(pending.manifest.version())))
             return
         }
+        val release = files.latest(manual) ?: return
         candidate = null
-        val (bytes, signature) = cache.read(manual) {
-            val latest = UpdateManifest.RELEASES + "latest/download/"
-            transport.bytes(URI.create(latest + "update.manifest"), UpdateManifest.MAX_MANIFEST) to
-                transport.bytes(URI.create(latest + "update.manifest.sig"), 64)
-        } ?: return
-        val manifest = UpdateManifest.verify(bytes, signature, UpdateManifest.releaseKey())
-        cache.save(bytes, signature)
-        if (!UpdateCompatibility.newer(manifest.version(), version)) {
+        if (!UpdateCompatibility.newer(release.manifest.version(), version)) {
             status = "Odyssey is up to date."
             if (manual) notify(UpdateNotice(status))
             return
         }
-        val missing = UpdateCompatibility.missing(manifest, installedVersions())
+        val missing = files.missing(release)
         if (missing != null) {
-            status = "Odyssey ${manifest.version()} needs $missing. Update your instance first."
-            if (manual) notify(UpdateNotice(status, UpdateNotice.Action.RELEASES, true))
+            status = "Odyssey ${release.manifest.version()} needs $missing. Update your instance first."
+            if (manual) notify(UpdateNotice(status, UpdateNotice.Action.Releases, true))
             return
         }
-        candidate = Candidate(manifest, bytes, signature)
-        status = "Odyssey ${manifest.version()} is available."
-        if (target == null) notify(UpdateNotice(status, UpdateNotice.Action.RELEASES))
-        else if (automatic && !rollbackPaused && installAutomatic) stage(target, candidate!!, automaticInstall = true)
-        else notify(UpdateNotice(status, UpdateNotice.Action.INSTALL))
+        candidate = release
+        status = "Odyssey ${release.manifest.version()} is available."
+        if (!manual && (!checksEnabled || release.manifest.version() in announced)) return
+        if (closed) return
+        announced.add(release.manifest.version())
+        notify(UpdateNotice(status, if (files.canDownload) UpdateNotice.Action.Download(release.manifest.version())
+            else UpdateNotice.Action.Releases))
     }
 
-    private fun stage(jar: Path, release: Candidate, automaticInstall: Boolean = false) {
-        val committed = UpdateStager.stage(jar, release.manifest, release.bytes, release.signature, transport,
-            { UpdateCompatibility.verifyMetadata(it, release.manifest) },
-            { !automaticInstall || automatic })
-        if (!committed) {
-            status = "Automatic update cancelled."
-            notify(UpdateNotice(status))
-            return
-        }
-        launchHelper(jar)
-        stagedNotice(release.manifest.version())
+    private fun scheduleNext() = synchronized(scheduling) {
+        nextCheck?.cancel(false)
+        nextCheck = null
+        if (!checksEnabled || closed) return@synchronized
+        // Sleep between requests, add jitter, and back off failures up to four hours.
+        val minutes = (Random.nextLong(25, 36) * (1L shl failures.coerceAtMost(4))).coerceAtMost(240)
+        nextCheck = worker.schedule({
+            submit(false, automaticRun = true) { if (checksEnabled) checkRelease(false) }
+        }, minutes, TimeUnit.MINUTES)
     }
 
-    private fun stagedNotice(releaseVersion: String) {
-        status = "Odyssey $releaseVersion will install when Minecraft closes."
-        notify(UpdateNotice(status))
-    }
-
-    private fun launchHelper(jar: Path) {
-        val directory = UpdateApplier.directory(jar)
-        UpdateApplier.validatePaths(jar, directory)
-        val helper = directory.resolve("helper.jar")
-        val bytes = javaClass.getResourceAsStream("/updates/odyssey-update-helper.jar").use {
-            requireNotNull(it) { "Missing update helper" }.readNBytes(256 * 1024)
-        }
-        // Don't rewrite a helper that may still be open on Windows.
-        if (!Files.exists(helper) || UpdateManifest.digest(helper) != UpdateManifest.digest(bytes))
-            UpdateApplier.atomicWrite(helper, bytes)
-        val process = ProcessHandle.current()
-        val start = process.info().startInstant().orElseThrow()
-        val java = Path.of(System.getProperty("java.home"), "bin",
-            if (System.getProperty("os.name").startsWith("Windows")) "java.exe" else "java")
-        ProcessBuilder(java.toString(), "-jar", helper.toString(), jar.toString(),
-            process.pid().toString(), start.toString(),
-            UpdateApplier.load(directory.resolve("pending.properties")).getProperty("transactionId"))
-            .redirectOutput(ProcessBuilder.Redirect.appendTo(directory.resolve("helper.log").toFile()))
-            .redirectErrorStream(true).start()
-    }
-
-    private fun pendingState(): UpdateApplier.PendingState = target?.let {
-        UpdateApplier.reconcile(it, UpdateManifest.releaseKey())
-    } ?: UpdateApplier.PendingState.NONE
-
-    private fun installedJar(): Path? = runCatching {
-        val origin = loader.getModContainer("odyssey").orElseThrow().origin
-        require(origin.kind == ModOrigin.Kind.PATH && origin.paths.size == 1)
-        val path = origin.paths.single().toRealPath()
-        require(Files.isRegularFile(path) && path.fileName.toString().endsWith(".jar"))
-        require(path.parent == loader.gameDir.resolve("mods").toRealPath())
-        path
-    }.getOrNull()
-
-    private fun installedVersions(): Map<String, String> = loader.allMods.associate {
-        it.metadata.id to it.metadata.version.friendlyString
-    } + ("java" to Runtime.version().feature().toString())
-
-    private fun submit(manual: Boolean, queue: Boolean = false, task: () -> Unit) {
-        if (queue) queued.incrementAndGet()
-        else if (!queued.compareAndSet(0, 1)) {
-            if (manual) notify(UpdateNotice("An update check is already running."))
-            return
-        }
-        worker.execute {
-            try { task() }
-            catch (error: Exception) {
-                OdysseyDiagnostics.logger.warn("[Odyssey Mod] Update operation failed", error)
-                status = "Couldn't update Odyssey. Your installed JAR is unchanged; try again or update manually."
-                if (manual) notify(UpdateNotice(status, UpdateNotice.Action.RELEASES, true))
-            } finally { queued.decrementAndGet() }
+    private fun submit(manual: Boolean, queue: Boolean = false, automaticRun: Boolean = false, task: () -> Unit) {
+        synchronized(scheduling) {
+            if (closed) return
+            if (queue) queued.incrementAndGet()
+            else if (!queued.compareAndSet(0, 1)) {
+                if (manual) notify(UpdateNotice("An update operation is already running."))
+                if (automaticRun) scheduleNext()
+                return
+            }
+            worker.execute {
+                try {
+                    if (!closed) task()
+                    if (automaticRun) failures = 0
+                } catch (error: Exception) {
+                    if (automaticRun) failures++
+                    OdysseyDiagnostics.logger.warn("[Odyssey Mod] Update operation failed", error)
+                    status = "Couldn't check or download the update. Your installed JAR is unchanged; try again."
+                    if (manual && !closed) notify(UpdateNotice(status, UpdateNotice.Action.Releases, true))
+                } finally {
+                    queued.decrementAndGet()
+                    if (automaticRun) scheduleNext()
+                }
+            }
         }
     }
-
-    private data class Candidate(val manifest: UpdateManifest, val bytes: ByteArray, val signature: ByteArray)
 }

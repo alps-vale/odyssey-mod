@@ -6,7 +6,7 @@ import java.time.Duration
 import java.time.Instant
 
 /** Failed refreshes retain the attempt backoff, never an older release's cached bytes. */
-internal class UpdateCache(directory: Path) {
+internal class UpdateCache(directory: Path, private val now: () -> Instant = Instant::now) {
     private val directory = directory
     private val stamp = directory.resolve("checked.txt")
     private val manifest = directory.resolve("update.manifest")
@@ -15,8 +15,8 @@ internal class UpdateCache(directory: Path) {
     fun read(manual: Boolean, download: () -> Pair<ByteArray, ByteArray>): Pair<ByteArray, ByteArray>? {
         Files.createDirectories(directory)
         val recent = runCatching {
-            val age = Duration.between(Instant.parse(Files.readString(stamp)), Instant.now())
-            !age.isNegative && age < Duration.ofHours(24)
+            val age = Duration.between(Instant.parse(Files.readString(stamp)), now())
+            !age.isNegative && age < Duration.ofMinutes(25)
         }.getOrDefault(false)
         if (!manual && recent) {
             if (!Files.exists(manifest) || !Files.exists(signature)) return null
@@ -26,7 +26,7 @@ internal class UpdateCache(directory: Path) {
         // Clear both before recording the attempt, including when download/verification later fails.
         Files.deleteIfExists(manifest)
         Files.deleteIfExists(signature)
-        UpdateApplier.atomicWrite(stamp, Instant.now().toString().toByteArray())
+        UpdateApplier.atomicWrite(stamp, now().toString().toByteArray())
         return download()
     }
 

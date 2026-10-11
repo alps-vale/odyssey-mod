@@ -2,6 +2,7 @@ package org.odyssey.mod
 
 import com.mojang.brigadier.Command
 import com.mojang.brigadier.arguments.IntegerArgumentType
+import com.mojang.brigadier.arguments.StringArgumentType
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 import net.fabricmc.api.ClientModInitializer
@@ -67,6 +68,7 @@ object OdysseyMod : ClientModInitializer {
         ClientLifecycleEvents.CLIENT_STOPPING.register {
             OdysseyDiagnostics.callback("client stopping") {
                 bridge.stop()
+                updater.stop()
             }
         }
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
@@ -82,11 +84,15 @@ object OdysseyMod : ClientModInitializer {
                                     Command.SINGLE_SUCCESS
                                 }
                                 .then(literal("check").executes { updater.check(); Command.SINGLE_SUCCESS })
-                                .then(literal("install").executes { updater.install(); Command.SINGLE_SUCCESS })
+                                .then(literal("download").executes { updater.download(); Command.SINGLE_SUCCESS }
+                                    .then(argument("version", StringArgumentType.word()).executes { context ->
+                                        updater.download(StringArgumentType.getString(context, "version"))
+                                        Command.SINGLE_SUCCESS
+                                    }))
                                 .then(
-                                    literal("auto")
-                                        .then(literal("on").executes { updater.setAutomatic(true); Command.SINGLE_SUCCESS })
-                                        .then(literal("off").executes { updater.setAutomatic(false); Command.SINGLE_SUCCESS }),
+                                    literal("checks")
+                                        .then(literal("on").executes { updater.setChecks(true); Command.SINGLE_SUCCESS })
+                                        .then(literal("off").executes { updater.setChecks(false); Command.SINGLE_SUCCESS }),
                                 ),
                         )
                         .then(
