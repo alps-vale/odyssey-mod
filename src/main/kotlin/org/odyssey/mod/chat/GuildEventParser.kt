@@ -2,13 +2,16 @@ package org.odyssey.mod.chat
 
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
+import net.minecraft.network.chat.HoverEvent
 import net.minecraft.network.chat.Style
 import net.minecraft.network.chat.contents.PlainTextContents
 import org.odyssey.mod.network.GuildEvent
 import org.odyssey.mod.network.GuildRank
 import org.odyssey.mod.network.GuildResource
+import org.odyssey.mod.network.actor
 import org.odyssey.mod.network.isGuildEventName
 import org.odyssey.mod.network.isGuildEventText
+import org.odyssey.mod.network.isMinecraftUsername
 import org.odyssey.mod.network.isWynncraftGuildName
 import java.util.Optional
 
@@ -53,6 +56,42 @@ internal object GuildEventParser {
         if (text.length > MAX_TEXT_CHARS) return null
         return match(text)
     }
+
+    /**
+     * The canonical IGN Wynncraft attached to the acting player's name: the same real-name hover
+     * as nicknamed guild chat, or a username insertion. Only a span holding exactly the actor at
+     * the start of the message counts, because target and body spans name other players.
+     * Disagreeing evidence yields no IGN.
+     */
+    fun actorUsername(component: Component, event: GuildEvent): String? {
+        val actor = event.actor
+        val text = component.string
+        val start = listOf(GUILD_BADGE, CONTINUATION).firstOrNull { text.startsWith("$it ") }?.length?.plus(1) ?: return null
+        val span = spanAt(component, start)?.takeIf { literal(it) == actor && it.siblings.isEmpty() } ?: return null
+        val shown = (span.style.hoverEvent as? HoverEvent.ShowText)?.value?.string?.let { hover ->
+            hover.removePrefix("$actor's real name is ").takeIf { it != hover && isMinecraftUsername(it) }
+        }
+        val inserted = span.style.insertion?.takeIf(::isMinecraftUsername)
+        if (shown != null && inserted != null && !shown.equals(inserted, ignoreCase = true)) return null
+        return shown ?: inserted
+    }
+
+    // The literal whose text begins exactly at `start` in the component's string, if one does.
+    private fun spanAt(component: Component, start: Int): Component? {
+        var offset = 0
+        val pending = ArrayDeque(listOf(component))
+        while (pending.isNotEmpty()) {
+            val node = pending.removeFirst()
+            val text = literal(node) ?: return null
+            if (offset == start && text.isNotEmpty()) return node
+            offset += text.length
+            if (offset > start) return null
+            pending.addAll(0, node.siblings)
+        }
+        return null
+    }
+
+    private fun literal(component: Component): String? = (component.contents as? PlainTextContents)?.text()
 
     private fun match(text: String): GuildEvent? {
         joined.matchEntire(text)?.let { return names(it, 1)?.let { (player) -> GuildEvent.MemberJoined(player) } }

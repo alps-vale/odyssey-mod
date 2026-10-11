@@ -30,6 +30,38 @@ import kotlin.test.assertNull
  */
 class GuildEventParserTest {
     @Test
+    fun `actor IGN comes only from the acting player's own span`() {
+        fun named(text: String, hover: String? = null, insertion: String? = null): MutableComponent =
+            Component.literal(text).withStyle { style ->
+                style.withColor(DARK_AQUA)
+                    .withHoverEvent(hover?.let { HoverEvent.ShowText(Component.literal(it)) })
+                    .withInsertion(insertion)
+            }
+        fun actorOf(message: Component): String? =
+            GuildEventParser.actorUsername(message, assertNotNull(GuildEventParser.parse(message), message.string))
+        val realName = "Wall of Cheese's real name is Colossal_Rat"
+
+        assertEquals("Colossal_Rat", actorOf(system(named("Wall of Cheese", hover = realName), literal(" has left the guild"))))
+        assertEquals(
+            "Colossal_Rat",
+            actorOf(system(named("Wall of Cheese", insertion = "Colossal_Rat"), literal(" has kicked Alice from the guild"))),
+        )
+        listOf(
+            // The target's hover names another player.
+            system(literal("Bob"), literal(" has kicked "), named("Wall of Cheese", hover = realName), literal(" from the guild")),
+            // A hover over the whole body, or carried by a wider parent, is not the actor's span.
+            system(named("Wall of Cheese has left the guild", hover = realName)),
+            system(Component.empty().withStyle { it.withHoverEvent(HoverEvent.ShowText(Component.literal(realName))) }
+                .append("Wall of Cheese").append(" has left the guild")),
+            // Disagreeing or mismatched evidence, and plain names, give no IGN.
+            system(named("Wall of Cheese", hover = realName, insertion = "Other_Rat"), literal(" has left the guild")),
+            system(named("Wall of Cheese", hover = "Cheese's real name is Colossal_Rat"), literal(" has left the guild")),
+            system(named("Wall of Cheese", hover = "Wall of Cheese's real name is Not A Name"), literal(" has left the guild")),
+            system(named("Bob"), literal(" has left the guild")),
+        ).forEach { assertNull(actorOf(it), it.string) }
+    }
+
+    @Test
     fun `recognizes evidenced guild system templates`() {
         listOf(
             system("Alice has joined the guild, say hello!", prefix = CONTINUATION) to GuildEvent.MemberJoined("Alice"),

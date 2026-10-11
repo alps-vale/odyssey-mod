@@ -46,6 +46,20 @@ class ProtocolTest {
     )
 
     @Test
+    fun `actor claims ride beside an unchanged shared event`() {
+        val claimed = fixture("client_guild_event_actor_claim.json")
+        val decoded = assertIs<ClientMessage.GuildEventObservation>(ProtocolCodec.decodeClient(ProtocolFrame.Text(claimed)))
+        assertJsonEquals(claimed, ProtocolCodec.encode(decoded))
+        assertEquals("Colossal_Rat", decoded.actorUsername)
+        val plain = assertIs<ClientMessage.GuildEventObservation>(
+            ProtocolCodec.decodeClient(ProtocolFrame.Text(fixture("client_guild_event_member_left.json"))),
+        )
+        assertEquals(plain.event, decoded.event)
+        assertEquals(null, plain.actorUsername)
+        assertFails { ProtocolCodec.encode(decoded.copy(actorUsername = "Colossal Rat")) }
+    }
+
+    @Test
     fun `client fixtures round trip`() {
         val messages = clientFixtures.map(::fixture).map {
             val decoded = ProtocolCodec.decodeClient(ProtocolFrame.Text(it))
