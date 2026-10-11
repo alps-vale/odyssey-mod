@@ -144,7 +144,8 @@ object OdysseyMod : ClientModInitializer {
     }
 
     internal fun observeGuildMessage(authorUsername: String, content: String, body: List<Component>) {
-        if (!::bridge.isInitialized) return
+        // Check the server at the packet: guild-format chat elsewhere is never rendered or queued.
+        if (!::bridge.isInitialized || !bridge.acceptsObservations(Minecraft.getInstance().currentServer?.ip)) return
         val connection = Minecraft.getInstance().connection
         ItemSharing.capture(body, content) { shares ->
             if (Minecraft.getInstance().connection === connection) bridge.observe(authorUsername, content, shares)

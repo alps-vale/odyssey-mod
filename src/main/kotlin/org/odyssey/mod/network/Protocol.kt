@@ -10,6 +10,7 @@ internal const val MAX_FRAME_BYTES = 8 * 1024
 internal const val MAX_CLIENT_FRAME_BYTES = 320 * 1024
 internal const val MAX_ITEM_SHARES = 3
 internal const val MAX_TOOLTIP_PNG_BYTES = 64 * 1024
+internal const val MAX_ITEM_NAME_CODE_POINTS = 128
 internal const val MAX_GUILD_BODY_CODE_POINTS = 400
 internal const val MAX_DISCORD_BODY_CODE_POINTS = 2_000
 internal const val MAX_DISCORD_LINES = 8
@@ -351,7 +352,7 @@ internal object ProtocolCodec {
                 }
                 message.itemShares.forEach {
                     require(it.encoded.isNotEmpty() && it.encoded in message.content)
-                    require(isSafeRemoteText(it.name, 128) && it.color in 0..MAX_RGB)
+                    require(isSafeRemoteText(it.name, MAX_ITEM_NAME_CODE_POINTS) && it.color in 0..MAX_RGB)
                     require(it.png == null || it.png.length <= (MAX_TOOLTIP_PNG_BYTES + 2) / 3 * 4)
                 }
             }

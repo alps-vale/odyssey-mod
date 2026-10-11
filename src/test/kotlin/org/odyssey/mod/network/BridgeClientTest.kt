@@ -601,6 +601,67 @@ class BridgeClientTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `chat and item images outside Wynncraft are never queued for a later connection`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment("other.example.com", true)
+            runCurrent()
+            assertFalse(client.acceptsObservations("other.example.com"))
+            val forged = ItemShare(ItemShareKind.WYNNCRAFT, "[Bow]", "Bow", 0xffffff, "iVBORw0KGgo=")
+            client.observe("Alice", "forged guild chat [Bow]", listOf(forged))
+            runCurrent()
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertTrue(client.acceptsObservations(BridgeClient.WYNNCRAFT_ADDRESS))
+            transport.sendWelcome(0)
+            runCurrent()
+            client.observe("Alice", "real guild chat")
+            runCurrent()
+            assertTrue(transport.sockets[0].sent.none { it.contains("forged guild chat") })
+            assertTrue(transport.sockets[0].sent.any { it.contains("real guild chat") })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `queued chat never replays into another guild after reconnect`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0)
+            runCurrent()
+            transport.close(0, 1013, "temporary")
+            runCurrent()
+            client.observe("Alice", "queued in Alps")
+            runCurrent()
+            advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
+            runCurrent()
+            transport.sendWelcome(1, guild = GuildRef("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Vale"))
+            runCurrent()
+            assertEquals(BridgeStatus.Connected("Alice", "Vale"), client.status())
+            assertTrue(transport.sockets[1].sent.none { it.contains("queued in Alps") })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `events outside Wynncraft are never queued for a later connection`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }

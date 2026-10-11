@@ -70,14 +70,15 @@ internal object TooltipCapture {
                     }.whenComplete { png, error ->
                         if (error == null) result.complete(png) else result.completeExceptionally(error)
                     }
-                } catch (error: Exception) {
+                } catch (error: Throwable) {
                     result.completeExceptionally(error)
                 } finally {
                     nativeImage.close()
                     imageTarget.destroyBuffers()
                 }
             }
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
+            // Optional mods render tooltip lines too; a linkage error there must not escape chat handling.
             target?.destroyBuffers()
             result.completeExceptionally(error)
         }

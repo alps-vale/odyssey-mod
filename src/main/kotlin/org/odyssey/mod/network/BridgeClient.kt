@@ -229,6 +229,11 @@ internal class BridgeClient(
 
     fun status(): BridgeStatus = currentStatus
 
+    /** Whether guild chat seen on [address] now could be sent, so its item images are worth rendering. */
+    fun acceptsObservations(address: String?): Boolean =
+        config.autoConnect && isWynncraftAddress(address) &&
+            currentStatus !is BridgeStatus.Terminal && currentStatus !is BridgeStatus.WaitingForLink
+
     fun online(callback: (Result<GuildOnlineSnapshot>) -> Unit) {
         commands.trySend(Command.Online(onlineDisplayEpoch.get(), callback))
     }
@@ -360,7 +365,7 @@ internal class BridgeClient(
     }
 
     private fun observation(command: Command.Observe) {
-        if (stoppedByTerminalError || waitingForLink) return
+        if (!eligible() || stoppedByTerminalError || waitingForLink) return
         submit(
             ClientMessage.GuildObservation(
                 PROTOCOL_VERSION,
@@ -577,8 +582,11 @@ internal class BridgeClient(
                     return
                 }
                 welcomed = false
-                if (observationGuildUuid != message.guild.uuid) {
-                    pending.removeIf { it is ClientMessage.GuildEventObservation }
+                when (observationGuildUuid) {
+                    message.guild.uuid -> Unit
+                    // Chat queued before any Welcome has no known guild; the backend checks its author.
+                    null -> pending.removeIf { it is ClientMessage.GuildEventObservation }
+                    else -> pending.clear()
                 }
                 observationGuildUuid = message.guild.uuid
                 guildEvents = GUILD_EVENTS_CAPABILITY in message.capabilities
