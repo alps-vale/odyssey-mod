@@ -38,6 +38,8 @@ class BridgeClientTest {
                 val status = client.status() as BridgeStatus.WaitingForLink
                 assertEquals(index + 1, status.attempt)
                 assertTrue(status.delayMillis in 30_000L..60_000L)
+                transport.completeFailure = if (index == 0) IOException("Temporary network error")
+                else TransportException("identity_not_linked", false, "Not linked")
                 client.observe("Alice", "unlinked chat")
                 client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
                 runCurrent()

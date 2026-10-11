@@ -751,7 +751,7 @@ internal class BridgeClient(
                 clearPresentation()
                 if (!waitingForLink) reconnectAttempt = 0
                 waitingForLink = true
-                scheduleReconnect("waiting for profile link", awaitingLink = true)
+                scheduleReconnect("waiting for profile link")
             }
             error is TransportException && (!error.retryable || error.code in TERMINAL_CODES) -> {
                 session = null
@@ -779,9 +779,9 @@ internal class BridgeClient(
         cause: Throwable? = null,
         socketStatus: Int? = null,
         socketReason: String? = null,
-        awaitingLink: Boolean = false,
     ) {
         if (!eligible() || stoppedByTerminalError || reconnectScheduled) return
+        val awaitingLink = waitingForLink
         reconnectScheduled = true
         val attempt = reconnectAttempt + 1
         val delayMillis = reconnectPolicy.delayMillis(reconnectAttempt)
