@@ -120,6 +120,36 @@ class BridgeClientTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `link setup notice retries when rendering loses the player`() = runTest {
+        val game = FakeGame().apply { dropLinkNotice = true }
+        val transport = FakeTransport { game.identity }
+        transport.completeFailure = TransportException("identity_not_linked", false, "Not linked")
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertTrue(game.statuses.none { it is BridgeStatus.WaitingForLink })
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, false)
+            runCurrent()
+            game.dropLinkNotice = false
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertEquals(1, game.statuses.count { it is BridgeStatus.WaitingForLink })
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, false)
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertEquals(1, game.statuses.count { it is BridgeStatus.WaitingForLink })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `waiting link checks are bounded and stop when leaving Wynncraft`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }
@@ -1347,6 +1377,7 @@ private class FakeGame : GameAccess {
     val rendered = CopyOnWriteArrayList<ServerMessage.Chat>()
     val statuses = CopyOnWriteArrayList<BridgeStatus>()
     val warnings = CopyOnWriteArrayList<BridgeWarning>()
+    var dropLinkNotice = false
 
     override fun launcherIdentity(): LauncherIdentity {
         identityFailure?.let { throw it }
@@ -1357,8 +1388,13 @@ private class FakeGame : GameAccess {
         executeCalls.incrementAndGet()
         action()
     }
-    override fun updateStatus(status: BridgeStatus) {
+    override fun updateStatus(status: BridgeStatus, onDisplayed: (Boolean) -> Unit) {
+        if (dropLinkNotice && status is BridgeStatus.WaitingForLink) {
+            onDisplayed(false)
+            return
+        }
         statuses += status
+        onDisplayed(true)
     }
     override fun showWarning(warning: BridgeWarning) {
         warnings += warning

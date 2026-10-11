@@ -64,7 +64,7 @@ internal interface GameAccess {
     fun launcherIdentity(): LauncherIdentity
     fun joinServer(serverId: String)
     fun execute(action: () -> Unit)
-    fun updateStatus(status: BridgeStatus)
+    fun updateStatus(status: BridgeStatus, onDisplayed: (Boolean) -> Unit = {})
     fun showWarning(warning: BridgeWarning)
     fun renderChat(message: ServerMessage.Chat)
 }
@@ -87,12 +87,16 @@ internal class MinecraftGameAccess(
         minecraft.execute(action)
     }
 
-    override fun updateStatus(status: BridgeStatus) {
+    override fun updateStatus(status: BridgeStatus, onDisplayed: (Boolean) -> Unit) {
         minecraft.execute {
+            var displayed = false
             OdysseyDiagnostics.callback("status notification rendering") {
+                val player = minecraft.player ?: return@callback
                 val component = OdysseyNotifications.transition(status) ?: return@callback
-                minecraft.player?.displayClientMessage(component, false)
+                player.displayClientMessage(component, false)
+                displayed = true
             }
+            onDisplayed(displayed)
         }
     }
 
@@ -180,6 +184,7 @@ internal class BridgeClient(
     private var stoppedByTerminalError = false
     private var waitingForLink = false
     private var linkNoticePending = false
+    private var linkNoticeDelivery: Any? = null
     private var reconnectAttempt = 0
     private var reconnectScheduled = false
     private var reconnectGeneration = 0L
@@ -284,6 +289,10 @@ internal class BridgeClient(
                     is Command.ConnectionProgress -> connectionProgress(command)
                     is Command.ConnectionSucceeded -> connectionSucceeded(command)
                     is Command.ConnectionFailed -> connectionFailed(command)
+                    is Command.LinkNoticeCompleted -> if (command.delivery === linkNoticeDelivery) {
+                        linkNoticeDelivery = null
+                        if (command.displayed) linkNoticePending = false
+                    }
                     is Command.Text -> text(command)
                     is Command.Binary -> protocolFailure(command.socket, "Binary frame received")
                     is Command.Ping -> if (command.socket === socket) {
@@ -875,6 +884,7 @@ internal class BridgeClient(
         reconnectAttempt = 0
         waitingForLink = false
         linkNoticePending = false
+        linkNoticeDelivery = null
         if (reason in NORMAL_DISCONNECT_REASONS) {
             OdysseyDiagnostics.logger.debug("[Odyssey Mod] Bridge disconnected reason={}", reason)
         }
@@ -948,15 +958,19 @@ internal class BridgeClient(
             showPendingLinkNotice()
         } else {
             linkNoticePending = false
+            linkNoticeDelivery = null
             game.updateStatus(value)
         }
     }
 
     private fun showPendingLinkNotice() {
-        if (!playable || !linkNoticePending) return
+        if (!playable || !linkNoticePending || linkNoticeDelivery != null) return
         val status = currentStatus as? BridgeStatus.WaitingForLink ?: return
-        game.updateStatus(status.copy(attempt = 1))
-        linkNoticePending = false
+        val delivery = Any()
+        linkNoticeDelivery = delivery
+        game.updateStatus(status.copy(attempt = 1)) { displayed ->
+            commands.trySend(Command.LinkNoticeCompleted(delivery, displayed))
+        }
     }
 
     private sealed interface Command {
@@ -972,6 +986,7 @@ internal class BridgeClient(
             val result: Result<GuildOnlineSnapshot>,
         ) : Command
         data class ConnectionProgress(val generation: Long, val stage: BridgeStage) : Command
+        data class LinkNoticeCompleted(val delivery: Any, val displayed: Boolean) : Command
         data class ConnectionSucceeded(
             val generation: Long,
             val identity: LauncherIdentity,
