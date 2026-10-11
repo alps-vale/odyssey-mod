@@ -24,19 +24,19 @@ import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 
 internal object TooltipCapture {
-    // One message's tooltips render together. A slot covers the colour/depth target, its GPU
-    // readback and the PNG encoder, so a timed-out result does not free capacity early.
-    private val slots = CaptureSlots(MAX_ITEM_SHARES)
+    // One message's tooltips render together and one more message's may wait. A slot covers the
+    // colour/depth target, its GPU readback and the PNG encoder, so a timed-out result does not free
+    // capacity early.
+    private val slots = CaptureSlots(limit = MAX_ITEM_SHARES, waitingLimit = MAX_ITEM_SHARES)
 
-    /** Call on the render thread. Completes with `null` if no image is ready within five seconds. */
-    fun capture(stack: ItemStack): CompletableFuture<String?> {
-        val result = CompletableFuture<String?>()
-        slots.submit { release ->
-            val releaseOnRenderThread = { Minecraft.getInstance().execute { release() } }
-            if (result.isDone) release() else render(stack, result, releaseOnRenderThread)
+    /**
+     * Call on the render thread. Completes with `null` at once when captures are saturated, or if no
+     * image is ready within five seconds.
+     */
+    fun capture(stack: ItemStack): CompletableFuture<String?> =
+        slots.capture(TimeUnit.SECONDS.toMillis(5)) { result, release ->
+            render(stack, result) { Minecraft.getInstance().execute { release() } }
         }
-        return result.completeOnTimeout(null, 5, TimeUnit.SECONDS)
-    }
 
     private fun render(stack: ItemStack, result: CompletableFuture<String?>, release: () -> Unit) {
         val minecraft = Minecraft.getInstance()
