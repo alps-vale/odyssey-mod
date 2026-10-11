@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- Check for releases while Minecraft is running and show one Download prompt per version.
+- Download updates only after you click Download or run `/odyssey update download`; install them when Minecraft closes.
+- Keep checks quiet, with randomized intervals, failure backoff, and a saved opt-out.
+
 ## 0.3.3
 
 - Connect automatically after linking your profile while playing Wynncraft, without needing `/odyssey reconnect`.

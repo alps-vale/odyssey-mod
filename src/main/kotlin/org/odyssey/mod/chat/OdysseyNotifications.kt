@@ -96,11 +96,12 @@ internal object OdysseyNotifications {
 
     fun update(update: UpdateNotice, usePill: Boolean): Component {
         val result = notice(update.text, if (update.warning) WARNING else FROST, usePill).copy()
-        val action = when (update.action) {
-            UpdateNotice.Action.INSTALL -> action(
-                "Update", ClickEvent.RunCommand("/odyssey update install"), "Install when Minecraft closes",
+        val action = when (val requested = update.action) {
+            is UpdateNotice.Action.Download -> action(
+                "Download", ClickEvent.RunCommand("/odyssey update download ${requested.version}"),
+                "Download Odyssey ${requested.version}; installs when Minecraft closes",
             )
-            UpdateNotice.Action.RELEASES -> action(
+            UpdateNotice.Action.Releases -> action(
                 "Releases", ClickEvent.OpenUrl(URI.create(UpdateManifest.RELEASES + "latest")), "Open Odyssey releases",
             )
             null -> null

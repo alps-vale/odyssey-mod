@@ -36,7 +36,7 @@ public final class UpdateStager {
             properties.setProperty("transactionId", UUID.randomUUID().toString());
             var journal = new ByteArrayOutputStream();
             properties.store(journal, "Odyssey pending update");
-            // Observe opt-out after all potentially slow work, immediately before the commit point.
+            // Observe cancellation after slow work, immediately before the commit point.
             if (!commitAllowed.getAsBoolean()) {
                 Files.delete(staged);
                 return false;
