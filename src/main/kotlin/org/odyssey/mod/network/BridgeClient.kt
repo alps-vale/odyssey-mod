@@ -179,6 +179,7 @@ internal class BridgeClient(
     private var welcomed = false
     private var stoppedByTerminalError = false
     private var waitingForLink = false
+    private var linkNoticePending = false
     private var reconnectAttempt = 0
     private var reconnectScheduled = false
     private var reconnectGeneration = 0L
@@ -336,6 +337,7 @@ internal class BridgeClient(
             return
         }
         if (socket == null && !stoppedByTerminalError) connectIfEligible()
+        showPendingLinkNotice()
         if (welcomed) send(ClientMessage.ObserverState(PROTOCOL_VERSION, playable))
     }
 
@@ -458,7 +460,8 @@ internal class BridgeClient(
 
     private fun connectionProgress(command: Command.ConnectionProgress) {
         if (command.generation != connectionGeneration || connectionJob == null) return
-        if (waitingForLink) return
+        if (waitingForLink && command.stage == BridgeStage.AUTHENTICATING) return
+        if (command.stage == BridgeStage.CONNECTING) waitingForLink = false
         setStatus(BridgeStatus.Progress(command.stage))
     }
 
@@ -746,6 +749,7 @@ internal class BridgeClient(
         val handshake = causes.filterIsInstance<WebSocketHandshakeException>().firstOrNull()
         when {
             error is TransportException && error.code == "identity_not_linked" -> {
+                if (socket != null) disconnect("identity_not_linked", clearSession = true, clearPresentation = true)
                 session = null
                 pending.clear()
                 clearPresentation()
@@ -870,6 +874,7 @@ internal class BridgeClient(
         cancelScheduledReconnect()
         reconnectAttempt = 0
         waitingForLink = false
+        linkNoticePending = false
         if (reason in NORMAL_DISCONNECT_REASONS) {
             OdysseyDiagnostics.logger.debug("[Odyssey Mod] Bridge disconnected reason={}", reason)
         }
@@ -938,7 +943,20 @@ internal class BridgeClient(
 
     private fun setStatus(value: BridgeStatus) {
         currentStatus = value
-        game.updateStatus(value)
+        if (value is BridgeStatus.WaitingForLink) {
+            if (value.attempt == 1) linkNoticePending = true
+            showPendingLinkNotice()
+        } else {
+            linkNoticePending = false
+            game.updateStatus(value)
+        }
+    }
+
+    private fun showPendingLinkNotice() {
+        if (!playable || !linkNoticePending) return
+        val status = currentStatus as? BridgeStatus.WaitingForLink ?: return
+        game.updateStatus(status.copy(attempt = 1))
+        linkNoticePending = false
     }
 
     private sealed interface Command {

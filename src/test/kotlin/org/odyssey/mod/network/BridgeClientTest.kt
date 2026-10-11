@@ -23,6 +23,103 @@ import kotlin.test.assertTrue
 class BridgeClientTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `link rejection on a live connection closes it before polling`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0)
+            runCurrent()
+            transport.onlineFailure = TransportException("identity_not_linked", false, "Not linked")
+            client.online { }
+            runCurrent()
+            assertTrue(transport.sockets[0].closed, "A stale socket must not block relinking")
+            assertTrue(client.status() is BridgeStatus.WaitingForLink)
+            advanceTimeBy(30_000)
+            runCurrent()
+            assertEquals(2, transport.sockets.size)
+            transport.sendWelcome(1)
+            runCurrent()
+            assertEquals(BridgeStatus.Connected("Alice", "Alps"), client.status())
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `linking restores normal socket retries after authentication succeeds`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        transport.completeFailure = TransportException("identity_not_linked", false, "Not linked")
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.completeFailure = null
+            transport.openSocketFailure = IOException("Socket temporarily unavailable")
+            advanceTimeBy(30_000)
+            runCurrent()
+            val retry = client.status() as BridgeStatus.Retrying
+            assertTrue(retry.delayMillis < 30_000)
+            assertTrue(game.statuses.contains(BridgeStatus.Progress(BridgeStage.CONNECTING)))
+            transport.openSocketFailure = null
+            advanceTimeBy(retry.delayMillis)
+            runCurrent()
+            assertEquals(2, transport.challengeCalls.get(), "Reuse the newly authenticated session")
+            transport.sendWelcome(0)
+            runCurrent()
+            assertEquals(BridgeStatus.Connected("Alice", "Alps"), client.status())
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `link setup notice survives world loading without repeating`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        transport.completeFailure = TransportException("identity_not_linked", false, "Not linked")
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, false)
+            runCurrent()
+            advanceTimeBy(30_000)
+            runCurrent()
+            assertEquals(2, (client.status() as BridgeStatus.WaitingForLink).attempt)
+            assertTrue(game.statuses.none { it is BridgeStatus.WaitingForLink })
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertEquals(
+                listOf(BridgeStatus.WaitingForLink(1, 30_000)),
+                game.statuses.filterIsInstance<BridgeStatus.WaitingForLink>(),
+            )
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, false)
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertEquals(1, game.statuses.count { it is BridgeStatus.WaitingForLink })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `waiting link checks are bounded and stop when leaving Wynncraft`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }
@@ -1103,6 +1200,7 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
     var onlineGate: CompletableDeferred<Unit>? = null
     var onlineFailure: Exception? = null
     var completeFailure: Exception? = null
+    var openSocketFailure: Exception? = null
 
     override suspend fun online(token: String): GuildOnlineSnapshot {
         onlineCalls.incrementAndGet()
@@ -1130,6 +1228,7 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
     override suspend fun openSocket(token: String, events: SocketEvents): BridgeSocket {
         openSocketCalls.incrementAndGet()
         openSocketGate?.await()
+        openSocketFailure?.let { throw it }
         this.events = events
         return FakeSocket().also { socket ->
             sockets += socket
