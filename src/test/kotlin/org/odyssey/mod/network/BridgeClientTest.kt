@@ -468,6 +468,162 @@ class BridgeClientTest {
     }
 
     @Test
+    fun `guild events need the backend capability and replay until acknowledged`() {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, game, OdysseyConfig(), ReconnectPolicy { 0 })
+        client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+        eventually { transport.sockets.size == 1 }
+        client.observeEvent(GuildEvent.MemberJoined("Alice"))
+        transport.sendWelcome(0)
+        eventually { client.status() is BridgeStatus.Connected }
+        client.observeEvent(GuildEvent.MemberLeft("Alice"))
+        client.observe("Alice", "chat still flows")
+        eventually { transport.sockets[0].sent.any { it.contains("chat still flows") } }
+        assertFalse(transport.sockets[0].sent.any { it.contains("guild_event") }, "older backends never see the frame")
+
+        transport.close(0, 1013, "temporary")
+        eventually { transport.sockets.size == 2 }
+        transport.sendWelcome(1, capabilities = listOf("guild_observation", "presentation", "guild_events"))
+        eventually { client.status() is BridgeStatus.Connected }
+        val kicked = GuildEvent.MemberKicked("Bob", "Alice")
+        client.observeEvent(kicked)
+        eventually { transport.sockets[1].sent.any { it.contains("guild_event") } }
+        val sent = transport.sockets[1].sent.decodedEvents().single()
+        assertEquals(kicked, sent.event, "events queued for an incapable backend are discarded")
+
+        transport.close(1, 1013, "temporary")
+        eventually { transport.sockets.size == 3 }
+        transport.sendWelcome(2, capabilities = listOf("guild_events"))
+        eventually { transport.sockets[2].sent.decodedEvents().map { it.id } == listOf(sent.id) }
+        transport.send(
+            2,
+            ServerMessage.ObservationResult(
+                PROTOCOL_VERSION,
+                sent.id,
+                ObservationStatus.ACCEPTED,
+                "99999999-9999-4999-8999-999999999999",
+            ),
+        )
+        transport.close(2, 1013, "temporary")
+        eventually { transport.sockets.size == 4 }
+        transport.sendWelcome(3, capabilities = listOf("guild_events"))
+        eventually { client.status() is BridgeStatus.Connected }
+        Thread.sleep(50)
+        assertTrue(transport.sockets[3].sent.decodedEvents().isEmpty(), "acknowledged events are not replayed")
+        client.stop()
+    }
+
+    private fun List<String>.decodedEvents() =
+        mapNotNull { runCatching { ProtocolCodec.decodeClient(ProtocolFrame.Text(it)) }.getOrNull() }
+            .filterIsInstance<ClientMessage.GuildEventObservation>()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `events outside Wynncraft are never queued for a later connection`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0, capabilities = listOf("guild_events"))
+            runCurrent()
+            client.updateEnvironment("other.example.com", true)
+            runCurrent()
+            repeat(110) { client.observeEvent(GuildEvent.MemberJoined("Spoofed")) }
+            runCurrent()
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(1, capabilities = listOf("guild_events"))
+            runCurrent()
+            assertTrue(transport.sockets[1].sent.decodedEvents().isEmpty())
+            client.observeEvent(GuildEvent.MemberJoined("RealMember"))
+            runCurrent()
+            assertEquals(listOf(GuildEvent.MemberJoined("RealMember")), transport.sockets[1].sent.decodedEvents().map { it.event })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `known unsupported events cannot evict chat during presentation synchronization`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcomeHeader(0, revision = 1)
+            runCurrent()
+            client.observe("Alice", "retain this chat")
+            repeat(110) { client.observeEvent(GuildEvent.MemberJoined("Unsupported")) }
+            runCurrent()
+            transport.completeSnapshot(0, revision = 1)
+            runCurrent()
+            assertTrue(transport.sockets[0].sent.any { it.contains("retain this chat") })
+            assertTrue(transport.sockets[0].sent.decodedEvents().isEmpty())
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `guild event backlog never crosses guilds after reconnect`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            client.observeEvent(GuildEvent.MemberJoined("BeforeWelcome"))
+            transport.sendWelcome(0, capabilities = listOf("guild_events"))
+            runCurrent()
+            assertTrue(transport.sockets[0].sent.decodedEvents().isEmpty())
+            client.observeEvent(GuildEvent.MemberLeft("AlpsMember"))
+            runCurrent()
+            assertEquals(1, transport.sockets[0].sent.decodedEvents().size)
+
+            transport.close(0, 1013, "temporary")
+            runCurrent()
+            client.observeEvent(GuildEvent.MemberJoined("QueuedInAlps"))
+            runCurrent()
+            advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
+            runCurrent()
+            transport.sendWelcome(
+                1,
+                capabilities = listOf("guild_events"),
+                guild = GuildRef("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Vale"),
+            )
+            runCurrent()
+            assertEquals(BridgeStatus.Connected("Alice", "Vale"), client.status())
+            assertTrue(transport.sockets[1].sent.decodedEvents().isEmpty(), "Alps events must not replay in Vale")
+            client.observeEvent(GuildEvent.MemberJoined("ValeMember"))
+            runCurrent()
+            assertEquals(
+                listOf(GuildEvent.MemberJoined("ValeMember")),
+                transport.sockets[1].sent.decodedEvents().map { it.event },
+            )
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @Test
     fun `reports typed lifecycle warnings and terminal state without overwriting connection`() {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }
@@ -911,7 +1067,7 @@ class BridgeClientTest {
         assertFalse(pending.values().any { it.id == "0" })
         pending.add(observation("100", content = "replacement"))
         assertEquals(100, pending.size())
-        assertEquals("replacement", pending.values().last { it.id == "100" }.content)
+        assertEquals("replacement", pending.chats().last { it.id == "100" }.content)
         pending.acknowledge(
             ServerMessage.ObservationResult(
                 PROTOCOL_VERSION,
@@ -938,12 +1094,12 @@ class BridgeClientTest {
         pending.add(observation("1").copy(itemShares = listOf(share)))
         pending.add(observation("2").copy(itemShares = listOf(share)))
         assertEquals(2, pending.size())
-        assertEquals(listOf(share.copy(png = null)), pending.values()[0].itemShares)
-        assertEquals(listOf(share), pending.values()[1].itemShares)
-        assertEquals(observation("1").content, pending.values()[0].content)
+        assertEquals(listOf(share.copy(png = null)), pending.chats()[0].itemShares)
+        assertEquals(listOf(share), pending.chats()[1].itemShares)
+        assertEquals(observation("1").content, pending.chats()[0].content)
         pending.acknowledge(ServerMessage.ObservationResult(PROTOCOL_VERSION, "2", ObservationStatus.ACCEPTED))
         pending.add(observation("3").copy(itemShares = listOf(share)))
-        assertEquals(listOf(share), pending.values().last().itemShares)
+        assertEquals(listOf(share), pending.chats().last().itemShares)
     }
 
     @Test
@@ -1218,6 +1374,8 @@ class BridgeClientTest {
 
     private fun observation(id: String, content: String = "body") =
         ClientMessage.GuildObservation(PROTOCOL_VERSION, id, "Alice", content)
+
+    private fun PendingObservations.chats() = values().filterIsInstance<ClientMessage.GuildObservation>()
 }
 
 private class FakeTransport(private val identity: () -> LauncherIdentity) : OdysseyTransport {
@@ -1268,22 +1426,33 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
         }
     }
 
-    fun sendWelcome(index: Int, revision: Long = 1, entries: List<PresentationEntry> = emptyList()) {
-        sendWelcomeHeader(index, revision)
+    fun sendWelcome(
+        index: Int,
+        revision: Long = 1,
+        entries: List<PresentationEntry> = emptyList(),
+        capabilities: List<String> = listOf("guild_observation", "presentation"),
+        guild: GuildRef = GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps"),
+    ) {
+        sendWelcomeHeader(index, revision, capabilities, guild)
         entries.forEach { sendSnapshotEntry(index, revision, it) }
         completeSnapshot(index, revision)
     }
 
 
-    fun sendWelcomeHeader(index: Int, revision: Long) {
+    fun sendWelcomeHeader(
+        index: Int,
+        revision: Long,
+        capabilities: List<String> = listOf("guild_observation", "presentation"),
+        guild: GuildRef = GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps"),
+    ) {
         // Real WebSockets deliver frames only after the client requests demand.
         eventually { sockets[index].requests > 0 }
         val current = identity()
         val welcome = ServerMessage.Welcome(
             PROTOCOL_VERSION,
             MinecraftIdentity(current.uuid, current.username),
-            GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps"),
-            listOf("guild_observation", "presentation"),
+            guild,
+            capabilities,
             revision,
         )
         val encoded = ProtocolCodec.encode(welcome)

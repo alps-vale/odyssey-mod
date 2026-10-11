@@ -44,6 +44,14 @@ are also supported without it. New-stat support follows that client's Wynntils
 version. If a preview cannot be rendered, the message still arrives
 with a readable item label. Only the tooltip is rendered—never your screen.
 
+## Guild events
+
+Guild joins, departures, kicks and invitations, rank changes, alliances, guild rewards,
+and deposits and withdrawals in the guild bank's Everyone tab also appear in Discord,
+posted as `[Alps] Guild` or `[Vale] Guild`. They are not repeated in game chat, and
+Wynntils is not required. Names appear as shown in game, including nicknames.
+Tributes and High Ranked bank transfers are not relayed.
+
 ## Updates
 
 Odyssey checks for stable releases at startup and about every 30 minutes while
