@@ -35,7 +35,9 @@ internal object TooltipCapture {
      */
     fun capture(stack: ItemStack): CompletableFuture<String?> =
         slots.capture(TimeUnit.SECONDS.toMillis(5)) { result, release ->
-            render(stack, result) { Minecraft.getInstance().execute { release() } }
+            // Always a later client turn: execute() runs inline on the render thread, inside the
+            // screenshot callback that still owns its readback buffer until we return.
+            render(stack, result) { Minecraft.getInstance().schedule { release() } }
         }
 
     private fun render(stack: ItemStack, result: CompletableFuture<String?>, release: () -> Unit) {

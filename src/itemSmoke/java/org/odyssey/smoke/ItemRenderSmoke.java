@@ -118,9 +118,27 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     return Unit.INSTANCE;
                 };
                 method.invoke(capture.getField("INSTANCE").get(null), List.of(body, second), content, complete);
+                // The next message's tooltips wait for those slots; only deferred releases start them.
+                AtomicBoolean waitedRendered = new AtomicBoolean();
+                Function1<List<?>, Unit> waitingMessage = shares -> {
+                    try {
+                        if (!rendered.get() || shares.size() != expected) throw new IllegalStateException("Waiting item message completed out of order");
+                        for (Object share : shares) {
+                            if (share.getClass().getMethod("getPng").invoke(share) == null) throw new IllegalStateException("Waiting tooltip capture did not render");
+                        }
+                        System.out.println("[Odyssey Item Smoke] Waiting tooltip captures PASS");
+                        waitedRendered.set(true);
+                    } catch (Exception failure) {
+                        failure.printStackTrace();
+                        System.out.println("[Odyssey Item Smoke] FAIL");
+                        minecraft.execute(minecraft::stop);
+                    }
+                    return Unit.INSTANCE;
+                };
+                method.invoke(capture.getField("INSTANCE").get(null), List.of(body, second), content, waitingMessage);
                 Function1<List<?>, Unit> followingChat = shares -> {
                     try {
-                        if (!rendered.get() || !shares.isEmpty()) throw new IllegalStateException("Plain chat overtook the item render");
+                        if (!rendered.get() || !waitedRendered.get() || !shares.isEmpty()) throw new IllegalStateException("Plain chat overtook the item render");
                         System.out.println("[Odyssey Item Smoke] Ordered chat completion PASS");
                         Files.writeString(Path.of(destination).resolveSibling("PASS"), "Native item-sharing render and ordering passed\n");
                     } catch (Exception failure) {
