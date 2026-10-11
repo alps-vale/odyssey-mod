@@ -21,6 +21,7 @@ import org.odyssey.mod.item.ItemSharing
 import net.minecraft.network.chat.Component
 import org.odyssey.mod.network.BackendOrigin
 import org.odyssey.mod.network.BridgeClient
+import org.odyssey.mod.network.GuildEvent
 import org.odyssey.mod.network.JavaOdysseyTransport
 import org.odyssey.mod.network.MinecraftGameAccess
 import org.odyssey.mod.update.OdysseyUpdater
@@ -148,6 +149,10 @@ object OdysseyMod : ClientModInitializer {
         ItemSharing.capture(body, content) { shares ->
             if (Minecraft.getInstance().connection === connection) bridge.observe(authorUsername, content, shares)
         }
+    }
+
+    internal fun observeGuildEvent(event: GuildEvent) {
+        if (::bridge.isInitialized) bridge.observeEvent(event)
     }
 
     private fun tick(minecraft: Minecraft) {

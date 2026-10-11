@@ -10,6 +10,7 @@ import org.odyssey.mod.OdysseyMod
 import org.odyssey.mod.OdysseyDiagnostics
 import org.odyssey.mod.chat.GuildChatParser
 import org.odyssey.mod.chat.GuildChatDecorator
+import org.odyssey.mod.chat.GuildEventParser
 import org.spongepowered.asm.mixin.Mixin
 import org.spongepowered.asm.mixin.injection.At
 import org.spongepowered.asm.mixin.injection.Inject
@@ -45,7 +46,11 @@ abstract class ClientPacketListenerMixin {
         callback: CallbackInfo,
     ) = OdysseyDiagnostics.callback("guild chat observation") {
         if (packet.overlay()) return@callback
-        val parsed = GuildChatParser.parse(packet.content()) ?: return@callback
-        OdysseyMod.observeGuildMessage(parsed.authorUsername, parsed.content, packet.content().siblings.drop(5))
+        val parsed = GuildChatParser.parse(packet.content())
+        if (parsed != null) {
+            OdysseyMod.observeGuildMessage(parsed.authorUsername, parsed.content, packet.content().siblings.drop(5))
+        } else {
+            GuildEventParser.parse(packet.content())?.let(OdysseyMod::observeGuildEvent)
+        }
     }
 }

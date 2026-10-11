@@ -15,6 +15,9 @@ internal const val MAX_DISCORD_BODY_CODE_POINTS = 2_000
 internal const val MAX_DISCORD_LINES = 8
 internal const val MAX_PRESENTATION_ENTRIES = 4_096
 internal const val MAX_REMOTE_MESSAGE_CODE_POINTS = 256
+internal const val MAX_GUILD_EVENT_NAME_CHARS = 32
+internal const val MAX_GUILD_EVENT_TEXT_CODE_POINTS = 64
+internal const val MAX_BANK_COUNT = 9_999
 private const val MAX_GUILD_PREFIX_CODE_POINTS = 16
 private const val MAX_RGB = 0x00ffffff
 private const val MAX_CHAT_DISPLAY_NAME_CODE_POINTS = 64
@@ -30,15 +33,83 @@ internal sealed interface ClientMessage {
     @SerialName("observer_state")
     data class ObserverState(override val v: Int, val active: Boolean) : ClientMessage
 
+    /** Guild-channel content reported for corroboration and acknowledged by [id]. */
+    sealed interface Observation : ClientMessage {
+        val id: String
+    }
+
     @Serializable
     @SerialName("guild_observation")
     data class GuildObservation(
         override val v: Int,
-        val id: String,
+        override val id: String,
         @SerialName("author_username") val authorUsername: String,
         val content: String,
         @SerialName("item_shares") val itemShares: List<ItemShare> = emptyList(),
-    ) : ClientMessage
+    ) : Observation
+
+    @Serializable
+    @SerialName("guild_event")
+    data class GuildEventObservation(override val v: Int, override val id: String, val event: GuildEvent) : Observation
+}
+
+/** A Wynncraft guild-channel system message, carrying names exactly as the game displayed them. */
+@Serializable
+internal sealed interface GuildEvent {
+    @Serializable
+    @SerialName("member_joined")
+    data class MemberJoined(val player: String) : GuildEvent
+
+    @Serializable
+    @SerialName("member_left")
+    data class MemberLeft(val player: String) : GuildEvent
+
+    @Serializable
+    @SerialName("member_kicked")
+    data class MemberKicked(val actor: String, val player: String) : GuildEvent
+
+    @Serializable
+    @SerialName("member_invited")
+    data class MemberInvited(val actor: String, val player: String) : GuildEvent
+
+    @Serializable
+    @SerialName("member_uninvited")
+    data class MemberUninvited(val actor: String, val player: String) : GuildEvent
+
+    @Serializable
+    @SerialName("rank_changed")
+    data class RankChanged(val actor: String, val player: String, val from: GuildRank, val to: GuildRank) : GuildEvent
+
+    @Serializable
+    @SerialName("alliance_formed")
+    data class AllianceFormed(val actor: String, val guild: String) : GuildEvent
+
+    @Serializable
+    @SerialName("alliance_revoked")
+    data class AllianceRevoked(val actor: String, val guild: String) : GuildEvent
+
+    /** A transfer in the bank tab every member can use. */
+    @Serializable
+    @SerialName("bank_deposit")
+    data class BankDeposit(val player: String, val count: Int, val item: String) : GuildEvent
+
+    @Serializable
+    @SerialName("bank_withdrawal")
+    data class BankWithdrawal(val player: String, val count: Int, val item: String) : GuildEvent
+
+    @Serializable
+    @SerialName("member_rewarded")
+    data class MemberRewarded(val actor: String, val player: String, val reward: String) : GuildEvent
+}
+
+@Serializable
+internal enum class GuildRank(val label: String) {
+    @SerialName("recruit") RECRUIT("Recruit"),
+    @SerialName("recruiter") RECRUITER("Recruiter"),
+    @SerialName("captain") CAPTAIN("Captain"),
+    @SerialName("strategist") STRATEGIST("Strategist"),
+    @SerialName("chief") CHIEF("Chief"),
+    @SerialName("owner") OWNER("Owner"),
 }
 
 @Serializable
@@ -236,8 +307,31 @@ internal object ProtocolCodec {
                     require(it.png == null || it.png.length <= (MAX_TOOLTIP_PNG_BYTES + 2) / 3 * 4)
                 }
             }
+            is ClientMessage.GuildEventObservation -> {
+                requireUuid(message.id)
+                require(isValid(message.event)) { "Invalid guild event" }
+            }
         }
     }
+
+    private fun isValid(event: GuildEvent): Boolean = when (event) {
+        is GuildEvent.MemberJoined -> isGuildEventName(event.player)
+        is GuildEvent.MemberLeft -> isGuildEventName(event.player)
+        is GuildEvent.MemberKicked -> isGuildEventName(event.actor) && isGuildEventName(event.player)
+        is GuildEvent.MemberInvited -> isGuildEventName(event.actor) && isGuildEventName(event.player)
+        is GuildEvent.MemberUninvited -> isGuildEventName(event.actor) && isGuildEventName(event.player)
+        is GuildEvent.RankChanged ->
+            isGuildEventName(event.actor) && isGuildEventName(event.player) && event.from != event.to
+        is GuildEvent.AllianceFormed -> isGuildEventName(event.actor) && isWynncraftGuildName(event.guild)
+        is GuildEvent.AllianceRevoked -> isGuildEventName(event.actor) && isWynncraftGuildName(event.guild)
+        is GuildEvent.BankDeposit -> isBankTransfer(event.player, event.count, event.item)
+        is GuildEvent.BankWithdrawal -> isBankTransfer(event.player, event.count, event.item)
+        is GuildEvent.MemberRewarded ->
+            isGuildEventName(event.actor) && isGuildEventName(event.player) && isGuildEventText(event.reward)
+    }
+
+    private fun isBankTransfer(player: String, count: Int, item: String): Boolean =
+        isGuildEventName(player) && count in 1..MAX_BANK_COUNT && isGuildEventText(item)
 
     private fun validate(message: ServerMessage) {
         requireVersion(message.v)
@@ -370,6 +464,28 @@ internal object ProtocolCodec {
 }
 
 internal fun isSafeRemoteCode(value: String): Boolean = remoteCode.matches(value)
+
+/** A displayed player or guild name: single-spaced words, since nicknames may contain spaces. */
+internal fun isGuildEventName(value: String): Boolean = isSpacedName(value) { it.isLetterOrDigit() || it == '_' }
+
+internal fun isWynncraftGuildName(value: String): Boolean = isSpacedName(value, Char::isLetter)
+
+/** Server-written item or reward text, without formatting codes, private glyphs or invisible characters. */
+internal fun isGuildEventText(value: String): Boolean =
+    value.codePointLength() in 1..MAX_GUILD_EVENT_TEXT_CODE_POINTS &&
+        value.split(' ').all(String::isNotEmpty) &&
+        value.codePoints().noneMatch { codePoint -> hiddenCodePoints.any { codePoint in it } }
+
+// Mirrors the backend's list exactly; a frame it rejects would close the bridge.
+private val hiddenCodePoints = listOf(
+    0x00..0x1F, 0x7F..0x9F, 0xA7..0xA7, 0xAD..0xAD, 0x061C..0x061C, 0x180E..0x180E, 0x200B..0x200F,
+    0x2028..0x202E, 0x2060..0x206F, 0xD800..0xF8FF, 0xFE00..0xFE0F, 0xFEFF..0xFEFF, 0xFFF9..0xFFFB,
+    0xE0000..0xE007F, 0xF0000..0x10FFFF,
+)
+
+private fun isSpacedName(value: String, allowed: (Char) -> Boolean): Boolean =
+    value.length <= MAX_GUILD_EVENT_NAME_CHARS &&
+        value.split(' ').all { word -> word.isNotEmpty() && word.all { it.code < 0x80 && allowed(it) } }
 
 internal fun isSafeRemoteText(
     value: String,

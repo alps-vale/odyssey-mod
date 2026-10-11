@@ -13,6 +13,19 @@ class ProtocolTest {
         "client_guild_observation.json",
         "client_guild_observation_item.json",
     )
+    private val guildEventFixtures = listOf(
+        "member_joined",
+        "member_left",
+        "member_kicked",
+        "member_invited",
+        "member_uninvited",
+        "rank_changed",
+        "alliance_formed",
+        "alliance_revoked",
+        "bank_deposit",
+        "bank_withdrawal",
+        "member_rewarded",
+    ).map { "client_guild_event_$it.json" }
     private val serverFixtures = listOf(
         "server_welcome.json",
         "server_presentation_snapshot.json",
@@ -34,6 +47,65 @@ class ProtocolTest {
         }
         assertIs<ClientMessage.ObserverState>(messages[0])
         assertIs<ClientMessage.GuildObservation>(messages[1])
+    }
+
+    @Test
+    fun `guild event fixtures round trip as typed client observations`() {
+        val events = guildEventFixtures.map(::fixture).map {
+            val decoded = ProtocolCodec.decodeClient(ProtocolFrame.Text(it))
+            assertJsonEquals(it, ProtocolCodec.encode(decoded))
+            assertFails { ProtocolCodec.decodeServer(ProtocolFrame.Text(it)) }
+            assertIs<ClientMessage.GuildEventObservation>(decoded).event
+        }
+        assertEquals(
+            listOf(
+                GuildEvent.MemberJoined("Alice"),
+                GuildEvent.MemberLeft("Wall of Cheese"),
+                GuildEvent.MemberKicked("Bob", "Alice"),
+                GuildEvent.MemberInvited("Bob", "Alice"),
+                GuildEvent.MemberUninvited("Bob", "Wall of Cheese"),
+                GuildEvent.RankChanged("Bob", "Alice", GuildRank.RECRUIT, GuildRank.CAPTAIN),
+                GuildEvent.AllianceFormed("Alps", "Silk Road"),
+                GuildEvent.AllianceRevoked("Bob", "Chiefs Of Corkus"),
+                GuildEvent.BankDeposit("Bob", 2, "Light Paper [\u272B\u272B\u272B]"),
+                GuildEvent.BankWithdrawal("Alice", 1, "Gelibord Teleportation Scroll [3/3]"),
+                GuildEvent.MemberRewarded("Bob", "Alice", "1024 Emeralds"),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun `guild events reject unbounded hidden or unknown fields`() {
+        val kicked = fixture("client_guild_event_member_kicked.json")
+        val rank = fixture("client_guild_event_rank_changed.json")
+        val alliance = fixture("client_guild_event_alliance_formed.json")
+        val bank = fixture("client_guild_event_bank_deposit.json")
+        val reward = fixture("client_guild_event_member_rewarded.json")
+        listOf(
+            kicked.replace("\"Bob\"", "\"\""),
+            kicked.replace("\"Bob\"", "\" Bob\""),
+            kicked.replace("\"Bob\"", "\"Bob  Smith\""),
+            kicked.replace("\"Bob\"", "\"${"B".repeat(33)}\""),
+            kicked.replace("\"Bob\"", "\"B\\u00f6b\""),
+            kicked.replace("\"Bob\"", "\"Bob\\u00a7c\""),
+            kicked.replace("member_kicked", "member_banned"),
+            kicked.replace("\"player\":\"Alice\"", "\"player\":\"Alice\",\"reason\":\"x\""),
+            kicked.replace("\"v\":2", "\"v\":1"),
+            kicked.replace("22222222-2222-4222-8222-000000000003", "not-a-uuid"),
+            rank.replace("\"captain\"", "\"recruit\""),
+            rank.replace("\"captain\"", "\"admin\""),
+            alliance.replace("Silk Road", "Silk Road 2"),
+            bank.replace("\"count\":2", "\"count\":0"),
+            bank.replace("\"count\":2", "\"count\":10000"),
+            bank.replace("\"item\"", "\"access\":\"high_ranked\",\"item\""),
+            bank.replace("Light Paper", " Light Paper"),
+            bank.replace("Light Paper", "Light\\u200bPaper"),
+            bank.replace("Light Paper", "Light \\ue000"),
+            bank.replace("Light Paper", "Light\\nPaper"),
+            bank.replace("Light Paper", "x".repeat(65)),
+            reward.replace("1024 Emeralds", ""),
+        ).forEach { frame -> assertFails(frame) { ProtocolCodec.decodeClient(ProtocolFrame.Text(frame)) } }
     }
 
     @Test

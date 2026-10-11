@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.5
+
+- Show guild joins, departures, kicks, invitations, rank changes, alliances, guild rewards and Everyone-tab guild bank transfers in Discord.
+
 ## 0.3.4
 
 - Check for releases while Minecraft is running and show one Download prompt per version.

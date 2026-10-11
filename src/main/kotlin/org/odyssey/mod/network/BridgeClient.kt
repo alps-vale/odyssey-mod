@@ -181,6 +181,7 @@ internal class BridgeClient(
     private var serverAddress: String? = null
     private var playable = false
     private var welcomed = false
+    private var guildEvents = false
     private var stoppedByTerminalError = false
     private var waitingForLink = false
     private var linkNoticePending = false
@@ -212,6 +213,10 @@ internal class BridgeClient(
         // Keep control messages reliable, but do not queue unbounded image bytes behind them.
         val shares = if (queuedObservations.incrementAndGet() > 16) itemShares.map { it.copy(png = null) } else itemShares
         if (commands.trySend(Command.Observe(authorUsername, content, shares)).isFailure) queuedObservations.decrementAndGet()
+    }
+
+    fun observeEvent(event: GuildEvent) {
+        commands.trySend(Command.ObserveEvent(event))
     }
 
     fun reconnect() {
@@ -264,6 +269,7 @@ internal class BridgeClient(
                     } finally {
                         queuedObservations.decrementAndGet()
                     }
+                    is Command.ObserveEvent -> eventObservation(command)
                     Command.Reconnect -> manualReconnect()
                     is Command.Online -> requestOnline(command)
                     is Command.OnlineCompleted -> {
@@ -350,15 +356,26 @@ internal class BridgeClient(
         if (welcomed) send(ClientMessage.ObserverState(PROTOCOL_VERSION, playable))
     }
 
-    private suspend fun observation(command: Command.Observe) {
+    private fun observation(command: Command.Observe) {
         if (stoppedByTerminalError || waitingForLink) return
-        val message = ClientMessage.GuildObservation(
-            PROTOCOL_VERSION,
-            UUID.randomUUID().toString(),
-            command.authorUsername,
-            command.content,
-            command.itemShares,
+        submit(
+            ClientMessage.GuildObservation(
+                PROTOCOL_VERSION,
+                UUID.randomUUID().toString(),
+                command.authorUsername,
+                command.content,
+                command.itemShares,
+            ),
         )
+    }
+
+    private fun eventObservation(command: Command.ObserveEvent) {
+        // Backends without the capability would reject the frame as a protocol violation.
+        if (stoppedByTerminalError || waitingForLink || (welcomed && !guildEvents)) return
+        submit(ClientMessage.GuildEventObservation(PROTOCOL_VERSION, UUID.randomUUID().toString(), command.event))
+    }
+
+    private fun submit(message: ClientMessage.Observation) {
         runCatching { ProtocolCodec.encode(message) }.getOrElse { error ->
             OdysseyDiagnostics.logger.error("[Odyssey Mod] Guild observation encoding failed", error)
             game.showWarning(
@@ -551,6 +568,7 @@ internal class BridgeClient(
                     return
                 }
                 welcomed = false
+                guildEvents = GUILD_EVENTS_CAPABILITY in message.capabilities
                 presentationTransfer = PresentationTransfer(
                     revision = message.presentationRevision,
                     identityUuid = message.identity.uuid,
@@ -643,6 +661,7 @@ internal class BridgeClient(
             transfer.guildPrefix,
         )
         send(ClientMessage.ObserverState(PROTOCOL_VERSION, playable))
+        if (!guildEvents) pending.removeIf { it is ClientMessage.GuildEventObservation }
         pending.values().forEach(::send)
     }
 
@@ -976,6 +995,7 @@ internal class BridgeClient(
     private sealed interface Command {
         data class Environment(val address: String?, val playable: Boolean) : Command
         data class Observe(val authorUsername: String, val content: String, val itemShares: List<ItemShare>) : Command
+        data class ObserveEvent(val event: GuildEvent) : Command
         data object Reconnect : Command
         data class Online(val epoch: Long, val callback: (Result<GuildOnlineSnapshot>) -> Unit) : Command
         data class OnlineCompleted(
@@ -1011,6 +1031,7 @@ internal class BridgeClient(
 
     companion object {
         const val WYNNCRAFT_ADDRESS = "play.wynncraft.com"
+        private const val GUILD_EVENTS_CAPABILITY = "guild_events"
 
         internal fun isWynncraftAddress(address: String?): Boolean {
             val normalized = address?.trim()?.lowercase() ?: return false
@@ -1049,17 +1070,18 @@ internal class BridgeClient(
 }
 
 internal class PendingObservations(private val capacity: Int, private val imageBudget: Int = 4 * 1024 * 1024) {
-    private val entries = LinkedHashMap<String, ClientMessage.GuildObservation>()
+    private val entries = LinkedHashMap<String, ClientMessage.Observation>()
 
-    fun add(message: ClientMessage.GuildObservation) {
+    fun add(message: ClientMessage.Observation) {
         entries[message.id] = message
         while (entries.size > capacity) entries.remove(entries.keys.first())
-        var imageBytes = entries.values.sumOf { it.itemShares.sumOf { share -> share.png?.length ?: 0 } }
-        for ((id, observation) in entries) {
+        val chats = entries.values.filterIsInstance<ClientMessage.GuildObservation>()
+        var imageBytes = chats.sumOf { it.itemShares.sumOf { share -> share.png?.length ?: 0 } }
+        for (observation in chats) {
             if (imageBytes <= imageBudget) break
             val bytes = observation.itemShares.sumOf { it.png?.length ?: 0 }
             if (bytes == 0) continue
-            entries[id] = observation.copy(itemShares = observation.itemShares.map { it.copy(png = null) })
+            entries[observation.id] = observation.copy(itemShares = observation.itemShares.map { it.copy(png = null) })
             imageBytes -= bytes
         }
     }
@@ -1068,7 +1090,8 @@ internal class PendingObservations(private val capacity: Int, private val imageB
         if (result.status != ObservationStatus.PENDING) entries.remove(result.id)
     }
 
-    fun values(): List<ClientMessage.GuildObservation> = entries.values.toList()
+    fun values(): List<ClientMessage.Observation> = entries.values.toList()
+    fun removeIf(predicate: (ClientMessage.Observation) -> Boolean) = entries.values.removeIf(predicate)
     fun size(): Int = entries.size
     fun clear() = entries.clear()
 }
