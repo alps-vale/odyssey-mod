@@ -14,6 +14,7 @@ import net.minecraft.world.item.Item
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.TooltipFlag
 import org.joml.Vector2i
+import org.odyssey.mod.network.MAX_ITEM_SHARES
 import org.odyssey.mod.network.MAX_TOOLTIP_PNG_BYTES
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -23,8 +24,21 @@ import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 
 internal object TooltipCapture {
+    // One message's tooltips render together. A slot covers the colour/depth target, its GPU
+    // readback and the PNG encoder, so a timed-out result does not free capacity early.
+    private val slots = CaptureSlots(MAX_ITEM_SHARES)
+
+    /** Call on the render thread. Completes with `null` if no image is ready within five seconds. */
     fun capture(stack: ItemStack): CompletableFuture<String?> {
         val result = CompletableFuture<String?>()
+        slots.submit { release ->
+            val releaseOnRenderThread = { Minecraft.getInstance().execute { release() } }
+            if (result.isDone) release() else render(stack, result, releaseOnRenderThread)
+        }
+        return result.completeOnTimeout(null, 5, TimeUnit.SECONDS)
+    }
+
+    private fun render(stack: ItemStack, result: CompletableFuture<String?>, release: () -> Unit) {
         val minecraft = Minecraft.getInstance()
         var target: TextureTarget? = null
         try {
@@ -55,11 +69,12 @@ internal object TooltipCapture {
             }
             // This target only contains the tooltip. The world, UI and player screen are never copied.
             Screenshot.takeScreenshot(imageTarget) { nativeImage ->
+                var encoding: CompletableFuture<String?>? = null
                 try {
                     val pixels = nativeImage.pixels
                     val imageWidth = nativeImage.width
                     val imageHeight = nativeImage.height
-                    CompletableFuture.supplyAsync {
+                    encoding = CompletableFuture.supplyAsync {
                         val image = BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_ARGB)
                         image.setRGB(0, 0, imageWidth, imageHeight, pixels, 0, imageWidth)
                         val bytes = ByteArrayOutputStream().use { output ->
@@ -67,8 +82,6 @@ internal object TooltipCapture {
                             output.toByteArray()
                         }
                         if (bytes.size > MAX_TOOLTIP_PNG_BYTES) null else Base64.getEncoder().encodeToString(bytes)
-                    }.whenComplete { png, error ->
-                        if (error == null) result.complete(png) else result.completeExceptionally(error)
                     }
                 } catch (error: Throwable) {
                     result.completeExceptionally(error)
@@ -76,13 +89,18 @@ internal object TooltipCapture {
                     nativeImage.close()
                     imageTarget.destroyBuffers()
                 }
+                // The PNG worker still holds this tooltip's pixels, so it keeps the slot until done.
+                encoding?.whenComplete { png, error ->
+                    if (error == null) result.complete(png) else result.completeExceptionally(error)
+                    release()
+                } ?: release()
             }
         } catch (error: Throwable) {
             // Optional mods render tooltip lines too; a linkage error there must not escape chat handling.
             target?.destroyBuffers()
             result.completeExceptionally(error)
+            release()
         }
-        return result.completeOnTimeout(null, 5, TimeUnit.SECONDS)
     }
 }
 
