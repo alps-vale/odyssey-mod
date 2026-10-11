@@ -520,6 +520,47 @@ class BridgeClientTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `management capability is checked before presentation completes without evicting chat`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        val gift = GuildEvent.ResourceGifted("Avicia", 1, GuildResource.FISH, "Northbound")
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0, capabilities = listOf("guild_events", "guild_management_events"))
+            runCurrent()
+            client.observeEvent(gift)
+            runCurrent()
+            assertEquals(listOf(gift), transport.sockets[0].sent.decodedEvents().map { it.event })
+
+            transport.close(0, 1013, "temporary")
+            runCurrent()
+            advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
+            runCurrent()
+            transport.sendWelcomeHeader(1, revision = 2, capabilities = listOf("guild_events"))
+            runCurrent()
+            client.observe("Alice", "ordinary chat survives")
+            repeat(110) { client.observeEvent(gift) }
+            runCurrent()
+            transport.completeSnapshot(1, revision = 2)
+            runCurrent()
+            assertTrue(transport.sockets[1].sent.decodedEvents().isEmpty(), "basic backends never see management frames")
+            assertTrue(transport.sockets[1].sent.any { it.contains("ordinary chat survives") })
+            client.observeEvent(GuildEvent.MemberJoined("NewMember"))
+            runCurrent()
+            assertEquals(listOf(GuildEvent.MemberJoined("NewMember")), transport.sockets[1].sent.decodedEvents().map { it.event })
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `events outside Wynncraft are never queued for a later connection`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }

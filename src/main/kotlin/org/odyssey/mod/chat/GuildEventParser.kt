@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Style
 import net.minecraft.network.chat.contents.PlainTextContents
 import org.odyssey.mod.network.GuildEvent
 import org.odyssey.mod.network.GuildRank
+import org.odyssey.mod.network.GuildResource
 import org.odyssey.mod.network.isGuildEventName
 import org.odyssey.mod.network.isGuildEventText
 import org.odyssey.mod.network.isWynncraftGuildName
@@ -35,6 +36,12 @@ internal object GuildEventParser {
     // Only the tab every member can use; Wynncraft may wrap between "(" and "Everyone" without a space.
     private val bank = Regex("$NAME (deposited|withdrew) ([1-9][0-9]{0,3})x (.+) (to|from) the Guild Bank \\( ?Everyone\\)")
     private val rewarded = Regex("$NAME rewarded (.+) to $NAME")
+    private const val RESOURCE_AMOUNT = "(Ⓑ |Ⓒ |Ⓚ |Ⓙ )?([1-9][0-9]{0,9}) (Emeralds?|Ore|Wood|Fish|Crops?)"
+    private val tributeScheduled = Regex("$NAME scheduled $RESOURCE_AMOUNT per hour to $NAME")
+    private val resourceGifted = Regex("$NAME gifted $RESOURCE_AMOUNT to $NAME")
+    private val territoryChanged = Regex("$NAME changed ([1-9][0-9]{0,3}) (upgrades|bonuses) on (.+)")
+    private val territoryBonusSet = Regex("$NAME set (.+) bonus to level (0|[1-9][0-9]{0,2}) on (.+)")
+    private val territoryLoadout = Regex("$NAME applied the loadout (.+) on (.+)")
 
     fun parse(component: Component): GuildEvent? {
         if (!isLiteralTree(component) || leadingColor(component) != GUILD_COLOR) return null
@@ -78,7 +85,47 @@ internal object GuildEventParser {
             val player = match.groupValues[3].takeIf { isName(it) } ?: return null
             return GuildEvent.MemberRewarded(actor, player, reward)
         }
+        tributeScheduled.unambiguous(text, " scheduled ")?.let { return resourceTransfer(it, scheduled = true) }
+        resourceGifted.unambiguous(text, " gifted ")?.let { return resourceTransfer(it, scheduled = false) }
+        // Reject delimiter-bearing labels rather than guess which words are the territory.
+        if (text.indexOf(" on ") != text.lastIndexOf(" on ")) return null
+        territoryChanged.unambiguous(text, " changed ")?.let { match ->
+            val actor = names(match, 1)?.single() ?: return null
+            val count = match.groupValues[2].toInt().takeIf { it >= 2 } ?: return null
+            val territory = match.groupValues[4].takeIf(::isGuildEventText) ?: return null
+            return if (match.groupValues[3] == "upgrades") {
+                GuildEvent.TerritoryUpgradesChanged(actor, count, territory)
+            } else {
+                GuildEvent.TerritoryBonusesChanged(actor, count, territory)
+            }
+        }
+        territoryBonusSet.unambiguous(text, " set ")?.let { match ->
+            val actor = names(match, 1)?.single() ?: return null
+            val bonus = match.groupValues[2].takeIf(::isGuildEventText) ?: return null
+            val territory = match.groupValues[4].takeIf(::isGuildEventText) ?: return null
+            return GuildEvent.TerritoryBonusSet(actor, bonus, match.groupValues[3].toInt(), territory)
+        }
+        territoryLoadout.unambiguous(text, " applied the loadout ")?.let { match ->
+            val actor = names(match, 1)?.single() ?: return null
+            val loadout = match.groupValues[2].takeIf(::isGuildEventText) ?: return null
+            val territory = match.groupValues[3].takeIf(::isGuildEventText) ?: return null
+            return GuildEvent.TerritoryLoadoutApplied(actor, loadout, territory)
+        }
         return null
+    }
+
+    private fun resourceTransfer(match: MatchResult, scheduled: Boolean): GuildEvent? {
+        val sender = names(match, 1)?.single() ?: return null
+        val amount = match.groupValues[3].toIntOrNull() ?: return null
+        val resource = GuildResource.entries.firstOrNull {
+            it.icon == match.groupValues[2] && it.label(amount) == match.groupValues[4]
+        } ?: return null
+        val guild = match.groupValues[5].takeIf(::isWynncraftGuildName) ?: return null
+        return if (scheduled) {
+            GuildEvent.TributeScheduled(sender, amount, resource, guild)
+        } else {
+            GuildEvent.ResourceGifted(sender, amount, resource, guild)
+        }
     }
 
     private fun bankTransfer(match: MatchResult): GuildEvent? {

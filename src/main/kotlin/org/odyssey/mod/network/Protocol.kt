@@ -100,6 +100,54 @@ internal sealed interface GuildEvent {
     @Serializable
     @SerialName("member_rewarded")
     data class MemberRewarded(val actor: String, val player: String, val reward: String) : GuildEvent
+
+    /** The sender can be a displayed player nickname or the allied guild itself. */
+    @Serializable
+    @SerialName("tribute_scheduled")
+    data class TributeScheduled(val sender: String, val amount: Int, val resource: GuildResource, val guild: String) : GuildEvent
+
+    @Serializable
+    @SerialName("resource_gifted")
+    data class ResourceGifted(val sender: String, val amount: Int, val resource: GuildResource, val guild: String) : GuildEvent
+
+    @Serializable
+    @SerialName("territory_upgrades_changed")
+    data class TerritoryUpgradesChanged(val actor: String, val count: Int, val territory: String) : GuildEvent
+
+    @Serializable
+    @SerialName("territory_bonus_set")
+    data class TerritoryBonusSet(val actor: String, val bonus: String, val level: Int, val territory: String) : GuildEvent
+
+    @Serializable
+    @SerialName("territory_bonuses_changed")
+    data class TerritoryBonusesChanged(val actor: String, val count: Int, val territory: String) : GuildEvent
+
+    @Serializable
+    @SerialName("territory_loadout_applied")
+    data class TerritoryLoadoutApplied(val actor: String, val loadout: String, val territory: String) : GuildEvent
+}
+
+/** Treasury resource wording includes the observed server icon and quantity agreement. */
+@Serializable
+internal enum class GuildResource(val icon: String, private val singular: String, private val plural: String = singular) {
+    @SerialName("emeralds") EMERALDS("", "Emerald", "Emeralds"),
+    @SerialName("ore") ORE("Ⓑ ", "Ore"),
+    @SerialName("wood") WOOD("Ⓒ ", "Wood"),
+    @SerialName("fish") FISH("Ⓚ ", "Fish"),
+    @SerialName("crops") CROPS("Ⓙ ", "Crop", "Crops"),
+    ;
+
+    fun label(amount: Int): String = if (amount == 1) singular else plural
+}
+
+internal fun GuildEvent.requiresManagementCapability(): Boolean = when (this) {
+    is GuildEvent.TributeScheduled, is GuildEvent.ResourceGifted,
+    is GuildEvent.TerritoryUpgradesChanged, is GuildEvent.TerritoryBonusSet,
+    is GuildEvent.TerritoryBonusesChanged, is GuildEvent.TerritoryLoadoutApplied -> true
+    is GuildEvent.MemberJoined, is GuildEvent.MemberLeft, is GuildEvent.MemberKicked,
+    is GuildEvent.MemberInvited, is GuildEvent.MemberUninvited, is GuildEvent.RankChanged,
+    is GuildEvent.AllianceFormed, is GuildEvent.AllianceRevoked, is GuildEvent.BankDeposit,
+    is GuildEvent.BankWithdrawal, is GuildEvent.MemberRewarded -> false
 }
 
 @Serializable
@@ -328,6 +376,18 @@ internal object ProtocolCodec {
         is GuildEvent.BankWithdrawal -> isBankTransfer(event.player, event.count, event.item)
         is GuildEvent.MemberRewarded ->
             isGuildEventName(event.actor) && isGuildEventName(event.player) && isGuildEventText(event.reward)
+        is GuildEvent.TributeScheduled ->
+            isGuildEventName(event.sender) && event.amount > 0 && isWynncraftGuildName(event.guild)
+        is GuildEvent.ResourceGifted ->
+            isGuildEventName(event.sender) && event.amount > 0 && isWynncraftGuildName(event.guild)
+        is GuildEvent.TerritoryUpgradesChanged ->
+            isGuildEventName(event.actor) && event.count in 2..MAX_BANK_COUNT && isGuildEventText(event.territory)
+        is GuildEvent.TerritoryBonusesChanged ->
+            isGuildEventName(event.actor) && event.count in 2..MAX_BANK_COUNT && isGuildEventText(event.territory)
+        is GuildEvent.TerritoryBonusSet ->
+            isGuildEventName(event.actor) && isGuildEventText(event.bonus) && event.level in 0..999 && isGuildEventText(event.territory)
+        is GuildEvent.TerritoryLoadoutApplied ->
+            isGuildEventName(event.actor) && isGuildEventText(event.loadout) && isGuildEventText(event.territory)
     }
 
     private fun isBankTransfer(player: String, count: Int, item: String): Boolean =

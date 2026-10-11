@@ -5,10 +5,12 @@ import com.mojang.serialization.JsonOps
 import net.minecraft.SharedConstants
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.ComponentSerialization
+import net.minecraft.network.chat.HoverEvent
 import net.minecraft.network.chat.MutableComponent
 import net.minecraft.server.Bootstrap
 import org.odyssey.mod.network.GuildEvent
 import org.odyssey.mod.network.GuildRank
+import org.odyssey.mod.network.GuildResource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -73,6 +75,111 @@ class GuildEventParserTest {
             assertEquals(expected, GuildEventParser.parse(message), message.string)
             assertNull(GuildChatParser.parse(message), message.string)
         }
+    }
+
+    @Test
+    fun `captured resource transfers accept both directions and exact resource wording`() {
+        // Wording and wrapping come from guild-channel log records; these literal trees are test fixtures.
+        val resources = listOf(
+            Triple("67 Emeralds", "1 Emerald", GuildResource.EMERALDS),
+            Triple("Ⓑ 67 Ore", "Ⓑ 1 Ore", GuildResource.ORE),
+            Triple("Ⓒ 67 Wood", "Ⓒ 1 Wood", GuildResource.WOOD),
+            Triple("Ⓚ 67 Fish", "Ⓚ 1 Fish", GuildResource.FISH),
+            Triple("Ⓙ 67 Crops", "Ⓙ 1 Crop", GuildResource.CROPS),
+        )
+        resources.forEach { (many, one, resource) ->
+            listOf(
+                system("WarraLegs27 scheduled $many per hour to Avicia") to
+                    GuildEvent.TributeScheduled("WarraLegs27", 67, resource, "Avicia"),
+                system("Avicia scheduled $one per hour to Northbound", prefix = CONTINUATION) to
+                    GuildEvent.TributeScheduled("Avicia", 1, resource, "Northbound"),
+                system("WarraLegs27 gifted $many to Avicia", prefix = CONTINUATION) to
+                    GuildEvent.ResourceGifted("WarraLegs27", 67, resource, "Avicia"),
+            ).forEach { (component, expected) ->
+                assertEquals(expected, GuildEventParser.parse(component), component.string)
+                assertNull(GuildChatParser.parse(component), component.string)
+            }
+        }
+        assertEquals(
+            GuildEvent.ResourceGifted("Avicia", 1, GuildResource.FISH, "Northbound"),
+            GuildEventParser.parse(system("Avicia gifted Ⓚ 1 Fish to Northbound", prefix = CONTINUATION)),
+        )
+        assertEquals(
+            GuildEvent.ResourceGifted("Avicia", 2, GuildResource.EMERALDS, "Northbound"),
+            GuildEventParser.parse(system("Avicia gifted 2 Emeralds to Northbound")),
+        )
+        assertEquals(
+            GuildEvent.ResourceGifted("WarraLegs27", 1, GuildResource.EMERALDS, "Avicia"),
+            GuildEventParser.parse(system("WarraLegs27 gifted 1 Emerald to Avicia")),
+        )
+    }
+
+    @Test
+    fun `territory templates keep wrapped text and the displayed nickname`() {
+        val nickname = literal("WarraLegs27", DARK_AQUA).copy().withStyle {
+            it.withItalic(true).withHoverEvent(HoverEvent.ShowText(Component.literal("HotLegs27")))
+        }
+        listOf(
+            system(nickname, literal(" changed "), literal("4 upgrades", YELLOW),
+                literal(" on "), literal("Volcanic Excavation", DARK_AQUA)) to
+                GuildEvent.TerritoryUpgradesChanged("WarraLegs27", 4, "Volcanic Excavation"),
+            system("WarraLegs27 set Mob Experience bonus to level 1 on ",
+                "Volcanic Excavation", prefix = CONTINUATION) to
+                GuildEvent.TerritoryBonusSet("WarraLegs27", "Mob Experience", 1, "Volcanic Excavation"),
+            system("WarraLegs27 changed 2 bonuses on Volcanic Excavation", prefix = CONTINUATION) to
+                GuildEvent.TerritoryBonusesChanged("WarraLegs27", 2, "Volcanic Excavation"),
+            system("WarraLegs27 applied the loadout Child Support on Volcanic", "Excavation",
+                prefix = CONTINUATION) to
+                GuildEvent.TerritoryLoadoutApplied("WarraLegs27", "Child Support", "Volcanic Excavation"),
+        ).forEach { (component, expected) ->
+            assertEquals(expected, GuildEventParser.parse(component), component.string)
+            assertNull(GuildChatParser.parse(component), component.string)
+        }
+    }
+
+    @Test
+    fun `resource and territory events reject player spoofing private prompts and orphan wraps`() {
+        listOf(
+            system("Bob: Alice gifted Ⓚ 1 Fish to Northbound"),
+            system("Bob: Alice changed 4 upgrades on Volcanic", "Excavation"),
+            system("Alice gifted Ⓚ 1 Fish to Northbound", color = YELLOW),
+            system("Alice gifted Ⓚ 1 Fish to Northbound", prefix = PARTY_BADGE),
+            Component.literal("The gift has been sent from Volcanic Excavation to Bloody Trail and will take roughly 9 minutes.")
+                .withColor(YELLOW),
+            Component.literal("The selected tributes have been saved and will travel from your headquarters towards the ally headquarters on a regular basis.")
+                .withColor(YELLOW),
+            system("Type the amount of Emeralds to schedule (or cancel):"),
+            system("Volcanic Excavation", prefix = CONTINUATION),
+            system("Bob applied the loadout Child Support on Volcanic").append("\nExcavation"),
+            system("Bob changed 4 upgrades on Volcanic Excavation")
+                .append(Component.translatable("chat.type.text", "Alice", "other")),
+        ).forEach { assertNull(GuildEventParser.parse(it), it.string) }
+    }
+
+    @Test
+    fun `resource icons counts and ambiguous territory labels fail closed`() {
+        listOf(
+            "Bob gifted 0 Emeralds to Avicia",
+            "Bob gifted 01 Emerald to Avicia",
+            "Bob gifted -1 Emerald to Avicia",
+            "Bob gifted 2147483648 Emeralds to Avicia",
+            "Bob gifted Ⓒ 67 Ore to Avicia",
+            "Bob gifted 1 Emeralds to Avicia",
+            "Bob gifted 2 Emerald to Avicia",
+            "Bob gifted Ⓙ 1 Crops to Avicia",
+            "Bob gifted Ⓙ 2 Crop to Avicia",
+            "Bob gifted 1 Fish to Avicia",
+            "Bob scheduled Ⓑ 0 Ore per hour to Avicia",
+            "Bob gifted Ⓚ 1 Fish to Avicia 2",
+            "Bob cancelled tributes to Avicia",
+            "Bob changed 1 upgrades on Volcanic Excavation",
+            "Bob changed 10000 bonuses on Volcanic Excavation",
+            "Bob set Mob Experience bonus to level 1000 on Volcanic Excavation",
+            "Bob applied the loadout The on Thing on Volcanic Excavation",
+            "Bob applied the loadout ​ on Volcanic Excavation",
+            "Bob applied the loadout Good on ${"x".repeat(65)}",
+            "You changed 4 upgrades on Volcanic Excavation",
+        ).forEach { assertNull(GuildEventParser.parse(system(it)), it) }
     }
 
     @Test
