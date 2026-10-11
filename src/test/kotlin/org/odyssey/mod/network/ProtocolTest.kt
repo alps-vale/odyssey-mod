@@ -25,6 +25,13 @@ class ProtocolTest {
         "bank_deposit",
         "bank_withdrawal",
         "member_rewarded",
+        "tribute_scheduled",
+        "resource_gifted",
+        "territory_upgrades_changed",
+        "territory_bonus_set",
+        "territory_bonuses_changed",
+        "territory_loadout_applied",
+
     ).map { "client_guild_event_$it.json" }
     private val serverFixtures = listOf(
         "server_welcome.json",
@@ -70,6 +77,12 @@ class ProtocolTest {
                 GuildEvent.BankDeposit("Bob", 2, "Light Paper [\u272B\u272B\u272B]"),
                 GuildEvent.BankWithdrawal("Alice", 1, "Gelibord Teleportation Scroll [3/3]"),
                 GuildEvent.MemberRewarded("Bob", "Alice", "1024 Emeralds"),
+                GuildEvent.TributeScheduled("Bob", 67, GuildResource.EMERALDS, "Avicia"),
+                GuildEvent.ResourceGifted("Avicia", 1, GuildResource.FISH, "Northbound"),
+                GuildEvent.TerritoryUpgradesChanged("Bob", 4, "Volcanic Excavation"),
+                GuildEvent.TerritoryBonusSet("Bob", "Mob Experience", 1, "Volcanic Excavation"),
+                GuildEvent.TerritoryBonusesChanged("Bob", 2, "Volcanic Excavation"),
+                GuildEvent.TerritoryLoadoutApplied("Bob", "Child Support", "Volcanic Excavation"),
             ),
             events,
         )
@@ -82,6 +95,12 @@ class ProtocolTest {
         val alliance = fixture("client_guild_event_alliance_formed.json")
         val bank = fixture("client_guild_event_bank_deposit.json")
         val reward = fixture("client_guild_event_member_rewarded.json")
+        val schedule = fixture("client_guild_event_tribute_scheduled.json")
+        val gift = fixture("client_guild_event_resource_gifted.json")
+        val upgrades = fixture("client_guild_event_territory_upgrades_changed.json")
+        val bonuses = fixture("client_guild_event_territory_bonuses_changed.json")
+        val bonus = fixture("client_guild_event_territory_bonus_set.json")
+        val loadout = fixture("client_guild_event_territory_loadout_applied.json")
         listOf(
             kicked.replace("\"Bob\"", "\"\""),
             kicked.replace("\"Bob\"", "\" Bob\""),
@@ -105,6 +124,19 @@ class ProtocolTest {
             bank.replace("Light Paper", "Light\\nPaper"),
             bank.replace("Light Paper", "x".repeat(65)),
             reward.replace("1024 Emeralds", ""),
+            schedule.replace("\"amount\":67", "\"amount\":0"),
+            schedule.replace("\"amount\":67", "\"amount\":2147483648"),
+            schedule.replace("\"amount\":67", "\"amount\":-1"),
+            schedule.replace("\"emeralds\"", "\"diamonds\""),
+            schedule.replace("\"Bob\"", "\"Bob\\u200b\""),
+            gift.replace("Northbound", "Northbound 2"),
+            upgrades.replace("\"count\":4", "\"count\":1"),
+            bonuses.replace("\"count\":2", "\"count\":10000"),
+            bonus.replace("\"level\":1", "\"level\":1000"),
+            bonus.replace("Mob Experience", "Mob\\nExperience"),
+            loadout.replace("Child Support", ""),
+            loadout.replace("Volcanic Excavation", "Volcanic\\ue000Excavation"),
+            loadout.replace("Child Support", "x".repeat(65)),
         ).forEach { frame -> assertFails(frame) { ProtocolCodec.decodeClient(ProtocolFrame.Text(frame)) } }
     }
 

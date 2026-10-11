@@ -182,6 +182,7 @@ internal class BridgeClient(
     private var playable = false
     private var welcomed = false
     private var guildEvents = false
+    private var guildManagementEvents = false
     private var guildEventCapabilityKnown = false
     private var observationGuildUuid: String? = null
     private var stoppedByTerminalError = false
@@ -373,9 +374,14 @@ internal class BridgeClient(
 
     private fun eventObservation(command: Command.ObserveEvent) {
         // Backends without the capability would reject the frame as a protocol violation.
-        if (!eligible() || stoppedByTerminalError || waitingForLink || observationGuildUuid == null || (guildEventCapabilityKnown && !guildEvents)) return
+        if (!eligible() || stoppedByTerminalError || waitingForLink || observationGuildUuid == null || (guildEventCapabilityKnown && !supportsEvent(command.event))) return
+        // Reconnects retain the guild, but management support requires a live, negotiated socket.
+        if (command.event.requiresManagementCapability() && (socket == null || !guildEventCapabilityKnown)) return
         submit(ClientMessage.GuildEventObservation(PROTOCOL_VERSION, UUID.randomUUID().toString(), command.event))
     }
+
+    private fun supportsEvent(event: GuildEvent): Boolean =
+        guildEvents && (!event.requiresManagementCapability() || guildManagementEvents)
 
     private fun submit(message: ClientMessage.Observation) {
         runCatching { ProtocolCodec.encode(message) }.getOrElse { error ->
@@ -576,7 +582,9 @@ internal class BridgeClient(
                 }
                 observationGuildUuid = message.guild.uuid
                 guildEvents = GUILD_EVENTS_CAPABILITY in message.capabilities
+                guildManagementEvents = GUILD_MANAGEMENT_EVENTS_CAPABILITY in message.capabilities
                 guildEventCapabilityKnown = true
+                pending.removeIf { it is ClientMessage.GuildEventObservation && !supportsEvent(it.event) }
                 presentationTransfer = PresentationTransfer(
                     revision = message.presentationRevision,
                     identityUuid = message.identity.uuid,
@@ -669,7 +677,6 @@ internal class BridgeClient(
             transfer.guildPrefix,
         )
         send(ClientMessage.ObserverState(PROTOCOL_VERSION, playable))
-        if (!guildEvents) pending.removeIf { it is ClientMessage.GuildEventObservation }
         pending.values().forEach(::send)
     }
 
@@ -1041,6 +1048,7 @@ internal class BridgeClient(
     companion object {
         const val WYNNCRAFT_ADDRESS = "play.wynncraft.com"
         private const val GUILD_EVENTS_CAPABILITY = "guild_events"
+        private const val GUILD_MANAGEMENT_EVENTS_CAPABILITY = "guild_management_events"
 
         internal fun isWynncraftAddress(address: String?): Boolean {
             val normalized = address?.trim()?.lowercase() ?: return false

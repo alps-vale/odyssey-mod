@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.6
+
+- Forward scheduled guild tributes and resource gifts to Discord, including incoming gifts from allies.
+- Show territory upgrade and bonus changes, bonus levels, and applied loadouts in Discord.
+
 ## 0.3.5
 
 - Show guild joins, departures, kicks, invitations, rank changes, alliances, guild rewards and Everyone-tab guild bank transfers in Discord.

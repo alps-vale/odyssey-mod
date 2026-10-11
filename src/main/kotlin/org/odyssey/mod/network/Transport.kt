@@ -106,7 +106,7 @@ internal class JavaOdysseyTransport(
                 .connectTimeout(Duration.ofSeconds(10))
                 .header("Authorization", "Bearer $token")
                 .header("X-Odyssey-Mod-Version", modVersion)
-                .header("X-Odyssey-Capabilities", "guild_events")
+                .header("X-Odyssey-Capabilities", "guild_events,guild_management_events")
                 .subprotocols("odyssey.bridge.v2")
                 .buildAsync(origin.webSocket.resolve("/api/v1/ws"), listener)
             continuation.invokeOnCancellation { future.cancel(true) }
