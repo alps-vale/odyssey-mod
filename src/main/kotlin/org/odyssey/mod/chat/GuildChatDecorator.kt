@@ -13,14 +13,22 @@ internal object GuildChatDecorator {
     @Volatile
     var enabled: Boolean = true
 
-    private data class DisplayHeader(val original: Component, val parsed: ParsedGuildChat, val text: String)
+    private data class DisplayHeader(val original: Component, val parsed: ParsedGuildChat, val prefix: String) {
+        fun displayedName(component: Component): String? {
+            val name = component.string.removePrefix(prefix)
+            if (name == component.string) return null
+            return listOf("${parsed.authorUsername}/${parsed.visibleName}", parsed.authorUsername, parsed.visibleName)
+                .filter { name.startsWith("$it:") }
+                .maxByOrNull(String::length)
+        }
+    }
     private var activeHeader: DisplayHeader? = null
 
     // Scope the validated server header to this delivery, before other mods rewrite its tree.
     fun withGuildMessage(original: Component, display: () -> Unit) {
         val previous = activeHeader
         activeHeader = if (enabled) GuildChatParser.parse(original)?.let {
-            DisplayHeader(original, it, original.siblings.take(5).joinToString("") { part -> part.string })
+            DisplayHeader(original, it, original.siblings.take(it.nameIndex).joinToString("") { part -> part.string })
         } else null
         try {
             display()
@@ -33,13 +41,15 @@ internal object GuildChatDecorator {
         if (BridgeChatRenderer.observeDisplayed(component)) return component
         if (!enabled) return component
         val direct = GuildChatParser.parse(component)
-        val header = if (direct == null) activeHeader?.takeIf { component.string.startsWith(it.text) } else null
+        val header = if (direct == null) activeHeader else null
+        val displayedName = header?.displayedName(component)
+        if (direct == null && displayedName == null) return component
         val parsed = direct ?: header?.parsed ?: return component
         val matches = PresentationRepository.snapshot().entries.values
             .filter { it.minecraftUsername == parsed.authorUsername }
         if (matches.size != 1) return component
         val presentation = matches.single()
-        if (header != null) return decorateRewritten(component, header, presentation.role)
+        if (header != null && displayedName != null) return decorateRewritten(component, header, displayedName, presentation.role)
         val decorated = component.copy()
         val siblings = decorated.siblings
         val originalName = siblings[parsed.nameIndex]
@@ -48,7 +58,7 @@ internal object GuildChatDecorator {
         return decorated
     }
 
-    private fun decorateRewritten(component: Component, header: DisplayHeader, role: RankPresentation): Component {
+    private fun decorateRewritten(component: Component, header: DisplayHeader, displayedName: String, role: RankPresentation): Component {
         val siblings = header.original.siblings
         val rankStart = siblings.take(header.parsed.rankIndex).sumOf { it.string.length }
         val rankEnd = rankStart + siblings[header.parsed.rankIndex].string.length
@@ -57,8 +67,8 @@ internal object GuildChatDecorator {
             .appendRange(component, 0, rankStart)
             .append(RankPillFactory.rank(role))
             .appendRange(component, rankEnd, nameStart)
-            .append(decorateName(siblings[header.parsed.nameIndex], header.parsed.visibleName, role.colors))
-            .appendRange(component, header.text.length, Int.MAX_VALUE)
+            .append(decorateName(siblings[header.parsed.nameIndex], displayedName, role.colors))
+            .appendRange(component, header.prefix.length + displayedName.length + 1, Int.MAX_VALUE)
     }
 
     private fun MutableComponent.appendRange(source: Component, start: Int, end: Int): MutableComponent {
