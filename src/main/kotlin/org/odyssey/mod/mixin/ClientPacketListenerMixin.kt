@@ -48,9 +48,9 @@ abstract class ClientPacketListenerMixin {
         if (packet.overlay()) return@callback
         val parsed = GuildChatParser.parse(packet.content())
         if (parsed != null) {
-            OdysseyMod.observeGuildMessage(parsed.authorUsername, parsed.content, packet.content().siblings.drop(5))
+            OdysseyMod.observeGuildMessage(parsed.authorUsername, parsed.visibleName, parsed.content, packet.content().siblings.drop(5))
         } else {
-            GuildEventParser.parse(packet.content())?.let(OdysseyMod::observeGuildEvent)
+            GuildEventParser.parse(packet.content())?.let { event -> OdysseyMod.observeGuildEvent(event, packet.content()) }
         }
     }
 }

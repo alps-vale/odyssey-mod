@@ -30,6 +30,58 @@ import kotlin.test.assertNull
  */
 class GuildEventParserTest {
     @Test
+    fun `actor evidence comes only from the acting player's own span`() {
+        fun named(text: String, hover: String? = null, insertion: String? = null): MutableComponent =
+            Component.literal(text).withStyle { style ->
+                style.withColor(DARK_AQUA)
+                    .withHoverEvent(hover?.let { HoverEvent.ShowText(Component.literal(it)) })
+                    .withInsertion(insertion)
+            }
+        fun evidenceOf(message: Component): ActorEvidence =
+            GuildEventParser.actorEvidence(message, assertNotNull(GuildEventParser.parse(message), message.string))
+        val realName = "Wall of Cheese's real name is Colossal_Rat"
+
+        assertEquals(
+            ActorEvidence.Named("Colossal_Rat"),
+            evidenceOf(system(named("Wall of Cheese", hover = realName), literal(" has left the guild"))),
+        )
+        assertEquals(
+            ActorEvidence.Named("Colossal_Rat"),
+            evidenceOf(system(named("Wall of Cheese", insertion = "Colossal_Rat"), literal(" has kicked Alice from the guild"))),
+        )
+        assertEquals(
+            ActorEvidence.Named("Colossal_Rat"),
+            evidenceOf(system(named("Wall of Cheese", hover = realName, insertion = "colossal_rat"), literal(" has left the guild"))),
+        )
+        // Only a real-name hover marks an actor that may be a guild as a player.
+        assertEquals(
+            ActorEvidence.Named("Colossal_Rat"),
+            evidenceOf(system(named("Wall of Cheese", hover = realName), literal(" formed an alliance with Silk Road"))),
+        )
+        assertEquals(
+            ActorEvidence.Absent,
+            evidenceOf(system(named("Avicia", insertion = "Avicia"), literal(" formed an alliance with Silk Road"))),
+        )
+        // Hover and insertion naming different players contradict each other.
+        assertEquals(
+            ActorEvidence.Conflicting,
+            evidenceOf(system(named("Wall of Cheese", hover = realName, insertion = "Other_Rat"), literal(" has left the guild"))),
+        )
+        listOf(
+            // The target's hover names another player.
+            system(literal("Bob"), literal(" has kicked "), named("Wall of Cheese", hover = realName), literal(" from the guild")),
+            // A hover over the whole body, or carried by a wider parent, is not the actor's span.
+            system(named("Wall of Cheese has left the guild", hover = realName)),
+            system(Component.empty().withStyle { it.withHoverEvent(HoverEvent.ShowText(Component.literal(realName))) }
+                .append("Wall of Cheese").append(" has left the guild")),
+            // Mismatched or malformed evidence, and plain names, say nothing.
+            system(named("Wall of Cheese", hover = "Cheese's real name is Colossal_Rat"), literal(" has left the guild")),
+            system(named("Wall of Cheese", hover = "Wall of Cheese's real name is Not A Name"), literal(" has left the guild")),
+            system(named("Bob"), literal(" has left the guild")),
+        ).forEach { assertEquals(ActorEvidence.Absent, evidenceOf(it), it.string) }
+    }
+
+    @Test
     fun `recognizes evidenced guild system templates`() {
         listOf(
             system("Alice has joined the guild, say hello!", prefix = CONTINUATION) to GuildEvent.MemberJoined("Alice"),

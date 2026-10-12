@@ -51,7 +51,13 @@ internal sealed interface ClientMessage {
 
     @Serializable
     @SerialName("guild_event")
-    data class GuildEventObservation(override val v: Int, override val id: String, val event: GuildEvent) : Observation
+    data class GuildEventObservation(
+        override val v: Int,
+        override val id: String,
+        val event: GuildEvent,
+        /** The acting player's canonical IGN seen in the packet; never part of the event itself. */
+        @SerialName("actor_username") val actorUsername: String? = null,
+    ) : Observation
 }
 
 /** A Wynncraft guild-channel system message, carrying names exactly as the game displayed them. */
@@ -359,6 +365,7 @@ internal object ProtocolCodec {
             is ClientMessage.GuildEventObservation -> {
                 requireUuid(message.id)
                 require(isValid(message.event)) { "Invalid guild event" }
+                require(message.actorUsername?.let(::isMinecraftUsername) ?: true) { "Invalid event actor" }
             }
         }
     }
@@ -527,6 +534,35 @@ internal object ProtocolCodec {
 internal fun isSafeRemoteCode(value: String): Boolean = remoteCode.matches(value)
 
 /** A displayed player or guild name: single-spaced words, since nicknames may contain spaces. */
+internal fun isMinecraftUsername(value: String): Boolean = minecraftUsername.matches(value)
+
+/** The displayed name of whoever performed the action: a player or nickname, or possibly a guild. */
+internal val GuildEvent.actor: String
+    get() = when (this) {
+        is GuildEvent.MemberJoined -> player
+        is GuildEvent.MemberLeft -> player
+        is GuildEvent.BankDeposit -> player
+        is GuildEvent.BankWithdrawal -> player
+        is GuildEvent.MemberKicked -> actor
+        is GuildEvent.MemberInvited -> actor
+        is GuildEvent.MemberUninvited -> actor
+        is GuildEvent.RankChanged -> actor
+        is GuildEvent.AllianceFormed -> actor
+        is GuildEvent.AllianceRevoked -> actor
+        is GuildEvent.MemberRewarded -> actor
+        is GuildEvent.TributeScheduled -> sender
+        is GuildEvent.ResourceGifted -> sender
+        is GuildEvent.TerritoryUpgradesChanged -> actor
+        is GuildEvent.TerritoryBonusSet -> actor
+        is GuildEvent.TerritoryBonusesChanged -> actor
+        is GuildEvent.TerritoryLoadoutApplied -> actor
+    }
+
+/** Alliance, tribute and gift templates name a player or a guild the same way. */
+internal val GuildEvent.actorMayBeGuild: Boolean
+    get() = this is GuildEvent.AllianceFormed || this is GuildEvent.AllianceRevoked ||
+        this is GuildEvent.TributeScheduled || this is GuildEvent.ResourceGifted
+
 internal fun isGuildEventName(value: String): Boolean = isSpacedName(value) { it.isLetterOrDigit() || it == '_' }
 
 internal fun isWynncraftGuildName(value: String): Boolean = isSpacedName(value, Char::isLetter)
