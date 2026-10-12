@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.9
+
+- Keep guild rank badges when a chat mod reveals a player’s real name beside their nickname.
+
 ## 0.3.8
 
 - Show guild actions in Discord as the player who made them, with their head and rank, including players using a nickname.

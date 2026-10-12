@@ -344,6 +344,40 @@ class GuildChatTest {
         )
     }
 
+    @Test
+    fun `revealed nickname headers keep linked rank and the displayed name`() {
+        val original = fixture("guild_nickname.json")
+        val parsed = assertNotNull(GuildChatParser.parse(original))
+        val role = RankPresentation("Highlander", RankColors(0x7788FF))
+        PresentationRepository.replace(PresentationSnapshot(1, mapOf(
+            "22222222-2222-4222-8222-222222222222" to PresentationEntry(
+                "22222222-2222-4222-8222-222222222222", parsed.authorUsername, role,
+            ),
+        )))
+        val prefix = original.siblings.take(parsed.nameIndex).joinToString("") { it.string }
+        fun display(name: String) = Component.empty()
+            .append(Component.literal(prefix))
+            .append(Component.literal("$name:").withStyle(original.siblings[parsed.nameIndex].style))
+            .also { result -> original.siblings.drop(parsed.nameIndex + 1).forEach { result.append(it.copy()) } }
+
+        for (name in listOf(parsed.authorUsername, "${parsed.authorUsername}/${parsed.visibleName}")) {
+            val rewritten = display(name)
+            assertNull(GuildChatParser.parse(rewritten), "rewritten chat is not wire observation evidence")
+            assertSame(rewritten, GuildChatDecorator.decorate(rewritten), "requires this delivery's original packet")
+            GuildChatDecorator.withGuildMessage(original) {
+                val decorated = GuildChatDecorator.decorate(rewritten)
+                assertNotSame(rewritten, decorated)
+                assertTrue(RankPillFactory.rank(role).string in decorated.string)
+                assertTrue(decorated.string.endsWith("$name: xD"))
+            }
+            assertSame(rewritten, GuildChatDecorator.decorate(rewritten), "delivery context is cleared")
+        }
+        val unrelated = display("OtherPlayer/${parsed.visibleName}")
+        GuildChatDecorator.withGuildMessage(original) {
+            assertSame(unrelated, GuildChatDecorator.decorate(unrelated), "never guess the author from a nickname")
+        }
+    }
+
     private fun flattenForDisplay(original: Component): Component {
         val result = Component.empty()
         original.visit(FormattedText.StyledContentConsumer<Unit> { style, text ->
