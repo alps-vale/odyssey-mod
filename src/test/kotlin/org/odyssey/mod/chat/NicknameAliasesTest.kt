@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class NicknameAliasesTest {
-    private val alps = ChatOrigin("play.wynncraft.com", scope = 0)
+    private val alps = ChatOrigin("play.wynncraft.com", scope = 0, gameConnection = 0)
     private var now = 0L
     private val aliases = NicknameAliases(capacity = 2, lifetimeNanos = 100, clock = { now })
 
@@ -31,7 +31,7 @@ class NicknameAliasesTest {
     }
 
     @Test
-    fun `aliases expire, stay bounded and never cross servers or guilds`() {
+    fun `aliases expire, stay bounded and never cross servers, guilds or game connections`() {
         aliases.remember(alps, "First", "First_Rat")
         now += 99
         assertEquals("First_Rat", aliases.resolve(alps, "First"))
@@ -44,8 +44,10 @@ class NicknameAliasesTest {
         assertNull(aliases.resolve(alps, "A"))
         assertEquals("C_Rat", aliases.resolve(alps, "C"))
 
-        assertNull(aliases.resolve(ChatOrigin("other.example.com", scope = 0), "C"))
+        assertNull(aliases.resolve(ChatOrigin("other.example.com", scope = 0, gameConnection = 0), "C"))
         aliases.remember(alps, "C", "C_Rat")
         assertNull(aliases.resolve(alps.copy(scope = 1), "C"))
+        aliases.remember(alps, "C", "C_Rat")
+        assertNull(aliases.resolve(alps.copy(gameConnection = 1), "C"))
     }
 }

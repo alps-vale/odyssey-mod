@@ -48,8 +48,11 @@ with a readable item label. Only the tooltip is rendered—never your screen.
 
 Guild joins, departures, kicks and invitations, rank changes, alliances, guild rewards,
 deposits and withdrawals in the guild bank's Everyone tab, scheduled tributes, resource gifts,
-and territory upgrade, bonus and loadout changes also appear in Discord,
-posted as `[Alps] Guild` or `[Vale] Guild`. They are not repeated in game chat, and
+and territory upgrade, bonus and loadout changes also appear in Discord.
+An action posts as the player who made it, with their rank and head, when the player
+can be confirmed, including through a nickname. Otherwise it posts as `[Alps] Guild`
+or `[Vale] Guild`. Alliances, tributes and resource gifts stay with the guild unless
+the game shows which player made them. Events are not repeated in game chat, and
 Wynntils is not required. Names appear as shown in game, including nicknames.
 High Ranked bank transfers are not relayed.
 

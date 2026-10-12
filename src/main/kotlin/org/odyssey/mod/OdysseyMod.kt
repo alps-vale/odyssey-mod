@@ -17,7 +17,7 @@ import org.odyssey.mod.config.OdysseyConfig
 import org.odyssey.mod.chat.BridgeChatRenderer
 import org.odyssey.mod.chat.OdysseyNotifications
 import org.odyssey.mod.chat.GuildChatDecorator
-import org.odyssey.mod.chat.NicknameAliases
+import org.odyssey.mod.chat.GuildEventActors
 import org.odyssey.mod.item.ItemSharing
 import net.minecraft.network.chat.Component
 import org.odyssey.mod.network.BackendOrigin
@@ -25,7 +25,6 @@ import org.odyssey.mod.network.BridgeClient
 import org.odyssey.mod.network.GuildEvent
 import org.odyssey.mod.network.JavaOdysseyTransport
 import org.odyssey.mod.network.MinecraftGameAccess
-import org.odyssey.mod.network.actor
 import org.odyssey.mod.update.OdysseyUpdater
 import org.odyssey.mod.update.UpdateNotice
 
@@ -35,7 +34,7 @@ object OdysseyMod : ClientModInitializer {
     private var lastPlayable = false
     private lateinit var updater: OdysseyUpdater
     private val updateNotices = ArrayDeque<UpdateNotice>()
-    private val nicknameAliases = NicknameAliases()
+    private val guildEventActors = GuildEventActors()
 
     override fun onInitializeClient() = OdysseyDiagnostics.callback("client initialization") {
         val origin = BackendOrigin.configured()
@@ -61,10 +60,17 @@ object OdysseyMod : ClientModInitializer {
                 tick(minecraft)
             }
         }
+        // Fired on the client thread as the play login completes, before that connection's chat.
+        ClientPlayConnectionEvents.JOIN.register { _, _, _ ->
+            OdysseyDiagnostics.callback("client join") {
+                bridge.gameConnectionChanged()
+            }
+        }
         ClientPlayConnectionEvents.DISCONNECT.register { _, _ ->
             OdysseyDiagnostics.callback("client disconnect") {
                 resetVisualState()
-                nicknameAliases.clear()
+                guildEventActors.clear()
+                bridge.gameConnectionChanged()
                 lastAddress = null
                 lastPlayable = false
                 bridge.updateEnvironment(null, false)
@@ -153,19 +159,18 @@ object OdysseyMod : ClientModInitializer {
         // rendered or queued, and a delayed item capture cannot reach another guild.
         val origin = bridge.chatOrigin(Minecraft.getInstance().currentServer?.ip)
         if (!bridge.acceptsObservations(origin)) return
-        // The parser only reports a different visible name after verifying its real-name hover.
-        if (visibleName != authorUsername) nicknameAliases.remember(origin, visibleName, authorUsername)
+        guildEventActors.learn(origin, visibleName, authorUsername)
         val connection = Minecraft.getInstance().connection
         ItemSharing.capture(body, content) { shares ->
             if (Minecraft.getInstance().connection === connection) bridge.observe(origin, authorUsername, content, shares)
         }
     }
 
-    internal fun observeGuildEvent(event: GuildEvent, spanUsername: String?) {
+    internal fun observeGuildEvent(event: GuildEvent, packet: Component) {
         if (!::bridge.isInitialized) return
         val origin = bridge.chatOrigin(Minecraft.getInstance().currentServer?.ip)
         if (!bridge.acceptsObservations(origin)) return
-        bridge.observeEvent(origin, event, spanUsername ?: nicknameAliases.resolve(origin, event.actor))
+        bridge.observeEvent(origin, event, guildEventActors.actorFor(origin, packet, event))
     }
 
     private fun tick(minecraft: Minecraft) {

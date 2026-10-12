@@ -558,6 +558,11 @@ internal val GuildEvent.actor: String
         is GuildEvent.TerritoryLoadoutApplied -> actor
     }
 
+/** Alliance, tribute and gift templates name a player or a guild the same way. */
+internal val GuildEvent.actorMayBeGuild: Boolean
+    get() = this is GuildEvent.AllianceFormed || this is GuildEvent.AllianceRevoked ||
+        this is GuildEvent.TributeScheduled || this is GuildEvent.ResourceGifted
+
 internal fun isGuildEventName(value: String): Boolean = isSpacedName(value) { it.isLetterOrDigit() || it == '_' }
 
 internal fun isWynncraftGuildName(value: String): Boolean = isSpacedName(value, Char::isLetter)

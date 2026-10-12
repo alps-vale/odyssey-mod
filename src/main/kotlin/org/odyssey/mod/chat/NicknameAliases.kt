@@ -4,8 +4,8 @@ import org.odyssey.mod.network.ChatOrigin
 import java.util.concurrent.TimeUnit
 
 /**
- * Recently verified guild-chat nicknames and their canonical IGNs, kept for one server and guild
- * scope. Names match exactly. A nickname seen for two IGNs stays ambiguous until it expires.
+ * Recently verified guild-chat nicknames and their canonical IGNs, kept for one server, guild
+ * scope and game connection. Names match exactly. A nickname seen for two IGNs stays ambiguous until it expires.
  * Call from one thread; Odyssey uses the client thread.
  */
 internal class NicknameAliases(
@@ -42,7 +42,7 @@ internal class NicknameAliases(
         aliases.clear()
     }
 
-    // Another server, guild or profile starts a new, empty scope.
+    // Another server, guild, profile or game connection starts a new, empty scope.
     private fun adopt(origin: ChatOrigin) {
         if (this.origin == origin) return
         aliases.clear()

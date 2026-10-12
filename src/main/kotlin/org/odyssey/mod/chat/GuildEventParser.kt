@@ -9,11 +9,20 @@ import org.odyssey.mod.network.GuildEvent
 import org.odyssey.mod.network.GuildRank
 import org.odyssey.mod.network.GuildResource
 import org.odyssey.mod.network.actor
+import org.odyssey.mod.network.actorMayBeGuild
 import org.odyssey.mod.network.isGuildEventName
 import org.odyssey.mod.network.isGuildEventText
 import org.odyssey.mod.network.isMinecraftUsername
 import org.odyssey.mod.network.isWynncraftGuildName
 import java.util.Optional
+
+/** What a guild event's own packet says about its actor's canonical IGN. */
+internal sealed interface ActorEvidence {
+    data object Absent : ActorEvidence
+    /** The actor span names two different players; nothing else may stand in for it. */
+    data object Conflicting : ActorEvidence
+    data class Named(val username: String) : ActorEvidence
+}
 
 /**
  * Recognizes Wynncraft guild-channel system messages. Only the server can start a guild-channel
@@ -61,19 +70,23 @@ internal object GuildEventParser {
      * The canonical IGN Wynncraft attached to the acting player's name: the same real-name hover
      * as nicknamed guild chat, or a username insertion. Only a span holding exactly the actor at
      * the start of the message counts, because target and body spans name other players.
-     * Disagreeing evidence yields no IGN.
+     * A hover and insertion naming different players conflict. A guild's name can be inserted
+     * like a player's, so only the hover names an actor that may be a guild.
      */
-    fun actorUsername(component: Component, event: GuildEvent): String? {
+    fun actorEvidence(component: Component, event: GuildEvent): ActorEvidence {
         val actor = event.actor
         val text = component.string
-        val start = listOf(GUILD_BADGE, CONTINUATION).firstOrNull { text.startsWith("$it ") }?.length?.plus(1) ?: return null
-        val span = spanAt(component, start)?.takeIf { literal(it) == actor && it.siblings.isEmpty() } ?: return null
+        val start = listOf(GUILD_BADGE, CONTINUATION).firstOrNull { text.startsWith("$it ") }?.length?.plus(1)
+            ?: return ActorEvidence.Absent
+        val span = spanAt(component, start)?.takeIf { literal(it) == actor && it.siblings.isEmpty() }
+            ?: return ActorEvidence.Absent
         val shown = (span.style.hoverEvent as? HoverEvent.ShowText)?.value?.string?.let { hover ->
             hover.removePrefix("$actor's real name is ").takeIf { it != hover && isMinecraftUsername(it) }
         }
         val inserted = span.style.insertion?.takeIf(::isMinecraftUsername)
-        if (shown != null && inserted != null && !shown.equals(inserted, ignoreCase = true)) return null
-        return shown ?: inserted
+        if (shown != null && inserted != null && !shown.equals(inserted, ignoreCase = true)) return ActorEvidence.Conflicting
+        val username = if (event.actorMayBeGuild) shown else shown ?: inserted
+        return username?.let(ActorEvidence::Named) ?: ActorEvidence.Absent
     }
 
     // The literal whose text begins exactly at `start` in the component's string, if one does.

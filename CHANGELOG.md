@@ -4,6 +4,7 @@
 
 - Show guild actions in Discord as the player who made them, with their head and rank, including players using a nickname.
 - Keep guild-wide actions, and actions whose player can't be confirmed, posted as the guild.
+- Keep alliances, tributes and resource gifts posted as the guild unless the game shows which player made them.
 
 ## 0.3.7
 
