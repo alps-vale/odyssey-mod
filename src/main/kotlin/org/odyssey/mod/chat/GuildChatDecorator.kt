@@ -18,7 +18,8 @@ internal object GuildChatDecorator {
             val name = component.string.removePrefix(prefix)
             if (name == component.string) return null
             return listOf("${parsed.authorUsername}/${parsed.visibleName}", parsed.authorUsername, parsed.visibleName)
-                .firstOrNull { name.startsWith("$it:") }
+                .filter { name.startsWith("$it:") }
+                .maxByOrNull(String::length)
         }
     }
     private var activeHeader: DisplayHeader? = null

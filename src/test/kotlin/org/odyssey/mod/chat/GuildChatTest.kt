@@ -7,6 +7,7 @@ import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.ComponentSerialization
 import net.minecraft.network.chat.FormattedText
+import net.minecraft.network.chat.HoverEvent
 import net.minecraft.network.chat.Style
 import net.minecraft.server.Bootstrap
 import org.odyssey.mod.network.ChatAuthor
@@ -375,6 +376,31 @@ class GuildChatTest {
         val unrelated = display("OtherPlayer/${parsed.visibleName}")
         GuildChatDecorator.withGuildMessage(original) {
             assertSame(unrelated, GuildChatDecorator.decorate(unrelated), "never guess the author from a nickname")
+        }
+    }
+
+    @Test
+    fun `a nickname containing the canonical name and colon remains one styled name`() {
+        val original = fixture("guild_nickname.json").copy()
+        val canonical = assertNotNull(GuildChatParser.parse(original)).authorUsername
+        val nickname = "$canonical: Great"
+        val oldName = original.siblings[4]
+        original.siblings[4] = Component.empty().withStyle(oldName.style)
+            .append(Component.literal(nickname).withStyle(oldName.siblings[0].style.withHoverEvent(
+                HoverEvent.ShowText(Component.literal("$nickname's real name is $canonical")),
+            )))
+            .append(oldName.siblings[1].copy())
+        val role = RankPresentation("Highlander", RankColors(0x7788FF))
+        PresentationRepository.replace(PresentationSnapshot(1, mapOf(
+            "22222222-2222-4222-8222-222222222222" to PresentationEntry(
+                "22222222-2222-4222-8222-222222222222", canonical, role,
+            ),
+        )))
+        GuildChatDecorator.withGuildMessage(original) {
+            val decorated = GuildChatDecorator.decorate(flattenForDisplay(original))
+            val fullName = assertNotNull(decorated.siblings.firstOrNull { it.string == "$nickname:" })
+            assertEquals(nickname, fullName.siblings.first().string)
+            assertTrue(decorated.string.endsWith("$nickname: xD"))
         }
     }
 
