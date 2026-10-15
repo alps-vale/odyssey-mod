@@ -33,6 +33,58 @@ import kotlin.test.assertTrue
 
 class GuildChatTest {
     @Test
+    fun `nickname hover requires a consistent identity for the exact visible name`() {
+        fun message(hover: String): Component = fixture("guild_nickname.json").copy().also { message ->
+            val wrapper = message.siblings[4].copy()
+            val name = wrapper.siblings[0]
+            wrapper.siblings[0] = name.copy().withStyle(name.style.withHoverEvent(
+                HoverEvent.ShowText(Component.literal(hover)),
+            ))
+            message.siblings[4] = wrapper
+        }
+        assertEquals("Alice", GuildChatParser.parse(message(
+            "Player profile\nWall of Cheese's real username is Alice\nClick to message",
+        ))?.authorUsername)
+        for (hover in listOf(
+            "Other Name's real name is Alice",
+            "Wall of Cheese's real name is Not A Username",
+            "Wall of Cheese's real name is Alice suffix",
+            "Wall of Cheese's real name is Alice\nWall of Cheese's real name is Bob",
+            "Alice's nickname is Wall of Cheese",
+        )) {
+            assertNull(GuildChatParser.parse(message(hover)), hover)
+        }
+    }
+
+    @Test
+    fun `nickname hover wording variants retain relay identity and linked formatting`() {
+        val visible = "Cloud Airlines"
+        val canonical = "Alice"
+        val role = RankPresentation("Highlander", RankColors(0x7788FF))
+        PresentationRepository.replace(PresentationSnapshot(1, mapOf(
+            "22222222-2222-4222-8222-222222222222" to PresentationEntry(
+                "22222222-2222-4222-8222-222222222222", canonical, role,
+            ),
+        )))
+        for (possessive in listOf("'s", "'")) {
+            for (label in listOf("name", "username")) {
+                val message = fixture("guild_nickname.json").copy()
+                val previous = message.siblings[4]
+                message.siblings[4] = Component.empty().withStyle(previous.style)
+                    .append(Component.literal(visible).withStyle(previous.siblings[0].style.withHoverEvent(
+                        HoverEvent.ShowText(Component.literal("$visible$possessive real $label is $canonical")),
+                    )))
+                    .append(previous.siblings[1].copy())
+                val parsed = assertNotNull(GuildChatParser.parse(message), "$possessive/$label")
+                assertEquals(canonical, parsed.authorUsername)
+                assertEquals(visible, parsed.visibleName)
+                assertEquals("xD", parsed.content)
+                assertTrue(RankPillFactory.rank(role).string in GuildChatDecorator.decorate(message).string)
+            }
+        }
+    }
+
+    @Test
     fun `captured guild ranks recover canonical author and literal body`() {
         listOf(
             "guild_ordinary.json" to Triple("HSPApplicant", "HSPApplicant", "probe 2"),
