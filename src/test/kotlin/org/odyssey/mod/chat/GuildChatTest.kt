@@ -45,6 +45,9 @@ class GuildChatTest {
         assertEquals("Alice", GuildChatParser.parse(message(
             "Player profile\nWall of Cheese's real username is Alice\nClick to message",
         ))?.authorUsername)
+        assertEquals("Alice", GuildChatParser.parse(message(
+            "Wall of Cheese's real name is Alice\nWall of Cheese's real username is alice",
+        ))?.authorUsername)
         for (hover in listOf(
             "Other Name's real name is Alice",
             "Wall of Cheese's real name is Not A Username",

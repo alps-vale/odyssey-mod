@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.10
 
-- Keep guild chat forwarding and rank formatting when nickname hovers use alternate apostrophe or username wording.
+- Keep guild chat forwarding and rank formatting when nickname hovers use alternate possessive or username wording.
 - Move bank, reward, resource, alliance and territory messages to the eco-log channel. Membership and rank messages stay in guild chat.
 - Keep a permanent record of captured guild system messages.
 

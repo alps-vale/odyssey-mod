@@ -73,7 +73,7 @@ internal object GuildChatParser {
             if (matched.groupValues[1] != visible) continue
             val found = matched.groupValues[2]
             if (canonical != null && !canonical.equals(found, ignoreCase = true)) return null
-            canonical = found
+            canonical = canonical ?: found
         }
         return canonical?.let { ParsedName(it, visible) }
     }
