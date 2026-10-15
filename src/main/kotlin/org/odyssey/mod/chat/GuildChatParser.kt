@@ -19,6 +19,7 @@ internal object GuildChatParser {
     private const val MAX_VISIBLE_NAME_CODE_POINTS = 32
     private const val HARD_WRAP_BOUNDARY_CODE_POINTS = 32
     private val username = Regex("^[A-Za-z0-9_]{1,16}$")
+    private val nicknameHover = Regex("(.+)'s? real (?:user)?name is ([A-Za-z0-9_]{1,16})")
 
     fun parse(component: Component): ParsedGuildChat? {
         val root = component.contents as? PlainTextContents ?: return null
@@ -66,10 +67,15 @@ internal object GuildChatParser {
         if (visible.codePointCount(0, visible.length) > MAX_VISIBLE_NAME_CODE_POINTS) return null
         if (visibleComponent.siblings.isNotEmpty() || literal(colon) != ":" || colon.siblings.isNotEmpty()) return null
         val hover = visibleComponent.style.hoverEvent as? HoverEvent.ShowText ?: return null
-        val prefix = "$visible's real name is "
-        val canonical = hover.value.string.removePrefix(prefix)
-        if (canonical == hover.value.string || !username.matches(canonical)) return null
-        return ParsedName(canonical, visible)
+        var canonical: String? = null
+        for (line in hover.value.string.lineSequence()) {
+            val matched = nicknameHover.matchEntire(line) ?: continue
+            if (matched.groupValues[1] != visible) continue
+            val found = matched.groupValues[2]
+            if (canonical != null && !canonical.equals(found, ignoreCase = true)) return null
+            canonical = canonical ?: found
+        }
+        return canonical?.let { ParsedName(it, visible) }
     }
 
     private fun parseBody(components: List<Component>): String? {
