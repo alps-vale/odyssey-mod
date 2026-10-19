@@ -1,5 +1,7 @@
 package org.odyssey.smoke;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -7,8 +9,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.imageio.ImageIO;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
 import kotlin.jvm.functions.Function1;
@@ -18,13 +22,17 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemLore;
 import org.odyssey.mod.chat.GuildChatDecorator;
 import org.odyssey.mod.chat.GuildChatParser;
 import org.odyssey.mod.chat.RankPillFactory;
+import org.odyssey.mod.item.TooltipCapture;
 import org.odyssey.mod.network.PresentationEntry;
 import org.odyssey.mod.network.PresentationRepository;
 import org.odyssey.mod.network.PresentationSnapshot;
@@ -33,6 +41,10 @@ import org.odyssey.mod.network.RankPresentation;
 
 /** Real GPU acceptance probe. Only the dedicated Gradle run sets its output path. */
 public final class ItemRenderSmoke implements ClientModInitializer {
+    /** Read by the smoke's Wynntils mixin, only while one tooltip is laid out. */
+    public static boolean wynntilsEventsOffServer;
+    private static final AtomicInteger fittedState = new AtomicInteger();
+
     @Override
     public void onInitializeClient() {
         String destination = System.getProperty("odyssey.itemSmoke.output");
@@ -59,6 +71,7 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                     encoded = encodedFixture();
                     if (encoded == null && tick < 1200) return;
                     if (encoded == null) throw new IllegalStateException("Wynntils gear registry did not load");
+                    if (fittedWynntilsSmoke(minecraft, destination)) return;
                 }
                 ticks.set(Integer.MIN_VALUE);
                 nativeNameColorSmoke();
@@ -101,6 +114,7 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                             String png = (String) share.getClass().getMethod("getPng").invoke(share);
                             if (png == null) throw new IllegalStateException("Tooltip render timed out or exceeded bounds");
                             String kind = share.getClass().getMethod("getKind").invoke(share).toString();
+                            checkDrawnBounds(Base64.getDecoder().decode(png), kind);
                             int color = (int) share.getClass().getMethod("getColor").invoke(share);
                             int expectedColor = kind.equals("WYNNTILS") ? 0xAA00AA : 0xFF55FF;
                             if (color != expectedColor) throw new IllegalStateException("Wrong rarity colour: " + Integer.toHexString(color));
@@ -156,6 +170,79 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                 minecraft.stop();
             }
         });
+    }
+
+    /** Wynntils shrinks and moves tooltips taller than the player's window; captures must not. */
+    private static boolean fittedWynntilsSmoke(Minecraft minecraft, String destination) throws Exception {
+        if (fittedState.get() == 2) return false;
+        if (fittedState.getAndSet(1) == 1) return true;
+        ItemStack stack = wynntilsStack(encodedFixture("Thrundacrack"));
+        int lines = stack.getTooltipLines(Item.TooltipContext.EMPTY, null, TooltipFlag.NORMAL).size();
+        if (lines * 10 + 10 <= minecraft.getWindow().getGuiScaledHeight())
+            throw new IllegalStateException("The window is too tall for Wynntils to fit the tooltip");
+        CompletableFuture<String> fitted;
+        wynntilsEventsOffServer = true;
+        try {
+            fitted = TooltipCapture.INSTANCE.capture(stack);
+        } finally {
+            wynntilsEventsOffServer = false;
+        }
+        fitted.thenCombine(TooltipCapture.INSTANCE.capture(stack), (withEvents, plain) -> {
+            try {
+                if (withEvents == null || plain == null) throw new IllegalStateException("Thrundacrack did not render");
+                byte[] png = Base64.getDecoder().decode(withEvents);
+                Files.write(Path.of(destination).resolveSibling("tooltip-wynntils-fitted.png"), png);
+                checkDrawnBounds(png, "Fitted WYNNTILS");
+                if (!withEvents.equals(plain)) throw new IllegalStateException("Wynntils fitting changed the captured tooltip");
+                System.out.println("[Odyssey Item Smoke] Wynntils-fitted tooltip matches its unfitted capture PASS");
+                return true;
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
+        }).whenComplete((passed, failure) -> minecraft.execute(() -> {
+            if (failure == null) {
+                fittedState.set(2);
+                return;
+            }
+            failure.printStackTrace();
+            System.out.println("[Odyssey Item Smoke] FAIL");
+            minecraft.stop();
+        }));
+        return true;
+    }
+
+    private static ItemStack wynntilsStack(String code) throws Exception {
+        Class<?> access = Class.forName("org.odyssey.mod.item.ItemSharing$WynntilsAccess");
+        var constructor = access.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        var decode = access.getDeclaredMethod("decode", String.class);
+        decode.setAccessible(true);
+        Object shared = ((List<?>) decode.invoke(constructor.newInstance(), code)).get(0);
+        var stack = shared.getClass().getDeclaredMethod("getStack");
+        stack.setAccessible(true);
+        return (ItemStack) stack.invoke(shared);
+    }
+
+    /** Undrawn pixels stay transparent and every edge of the image holds a drawn pixel. */
+    private static void checkDrawnBounds(byte[] png, String kind) throws IOException {
+        var image = ImageIO.read(new ByteArrayInputStream(png));
+        int width = image.getWidth();
+        int height = image.getHeight();
+        boolean transparent = false, top = false, bottom = false, left = false, right = false;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (image.getRGB(x, y) >>> 24 == 0) {
+                    transparent = true;
+                    continue;
+                }
+                top |= y == 0;
+                bottom |= y == height - 1;
+                left |= x == 0;
+                right |= x == width - 1;
+            }
+        }
+        if (!transparent || !(top && bottom && left && right))
+            throw new IllegalStateException(kind + " tooltip PNG is not cropped to transparent-backed drawn pixels");
     }
 
     private static void nativeNameColorSmoke() throws Exception {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.11
+
+- Show shared item tooltips in Discord at full size without the black area below and beside them, including long tooltips that Wynntils shrinks to fit a small game window.
+- Copy shared item tooltip images out of the graphics card faster, so capturing a preview holds up the game a little less.
+
 ## 0.3.10
 
 - Keep guild chat forwarding and rank formatting when nickname hovers use alternate possessive or username wording.

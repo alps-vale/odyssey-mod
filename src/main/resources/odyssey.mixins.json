@@ -5,7 +5,8 @@
   "client": [
     "ChatComponentMixin",
     "ClientPacketListenerMixin",
-    "TooltipGuiRendererMixin"
+    "TooltipGuiRendererMixin",
+    "TooltipWindowMixin"
   ],
   "injectors": {
     "defaultRequire": 1
