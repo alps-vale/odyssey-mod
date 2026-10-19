@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.11
 
 - Show shared item tooltips in Discord at full size without the black area below and beside them, including long tooltips that Wynntils shrinks to fit a small game window.
 
