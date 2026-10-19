@@ -99,11 +99,15 @@ internal object TooltipCapture {
             encoder.copyTextureToBuffer(colorTexture, buffer, 0, {
                 var encoding: CompletableFuture<String?>? = null
                 try {
-                    val pixels = encoder.mapBuffer(buffer, true, false).use { view ->
+                    val pixels = IntArray(pixelWidth * pixelHeight)
+                    encoder.mapBuffer(buffer, true, false).use { view ->
                         val data = view.data()
-                        IntArray(pixelWidth * pixelHeight) { index ->
-                            val textureRow = pixelHeight - 1 - index / pixelWidth
-                            ARGB.fromABGR(data.getInt((textureRow * pixelWidth + index % pixelWidth) * pixelSize))
+                        for (row in 0 until pixelHeight) {
+                            val source = (pixelHeight - 1 - row) * pixelWidth * pixelSize
+                            val destination = row * pixelWidth
+                            for (x in 0 until pixelWidth) {
+                                pixels[destination + x] = ARGB.fromABGR(data.getInt(source + x * pixelSize))
+                            }
                         }
                     }
                     encoding = CompletableFuture.supplyAsync {
