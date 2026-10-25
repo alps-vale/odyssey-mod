@@ -19,7 +19,7 @@ mise run ci
 mise run build
 ```
 
-`ci` runs the build, tests and workflow linting. `build` compiles the mod into `build/libs/odyssey-mod.jar`; it does not install or launch Minecraft.
+`ci` runs the build, tests and workflow linting. `build` compiles the mod into `build/libs/odyssey-mod.jar`.
 
 Once the mod is running in game, `/odyssey status` shows the current connection state.
 
