@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.12
+
+- Important update: update Odyssey and restart Minecraft to keep connecting to the updated backend. Your linked account is preserved.
+
 ## 0.3.11
 
 - Show shared item tooltips in Discord at full size without the black area below and beside them, including long tooltips that Wynntils shrinks to fit a small game window.

@@ -1,0 +1,65 @@
+[
+  {
+    "origin": "https://odyssey.notes.supply",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "78d0017eed1961719a3216d1431e1b2e6a7d5b4f"
+  },
+  {
+    "origin": "https://staging.example",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "7bff08c9b1e4e2183edd67d0c6b70f66058c0235"
+  },
+  {
+    "origin": "https://odyssey.notes.supply:8443",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "3c7d8013ed3c562cbd6082cdb696e2a01d10e008"
+  },
+  {
+    "origin": "http://127.0.0.1:8080",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "f5eaa98b29fb98a935bacdf75949b73c68b40b74"
+  },
+  {
+    "origin": "https://[::1]:8443",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "bf3e3ed6a0a8948caa96c4975bc537a037d2f5fa"
+  },
+  {
+    "origin": "https://vector-343.example",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "001ff84119fe8b9a27bab0ff03ca53ad4ca7a6e1"
+  },
+  {
+    "origin": "https://[0:0:0:0:0:0:0:1]:8443",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "bf3e3ed6a0a8948caa96c4975bc537a037d2f5fa"
+  },
+  {
+    "origin": "https://[2001:0db8:0000:0000:0001:0000:0000:0001]:8443",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "616533eddd843f6b8ce9fa6a42f21c2a2321a1b4"
+  },
+  {
+    "origin": "https://[::ffff:192.0.2.1]:8443",
+    "challenge_id": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "server_id": "0123456789abcdef0123456789abcdef01234567",
+    "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "derived_server_id": "bfffa9b7ccb6ceb5409ba748235ee5006ba1db87"
+  }
+]

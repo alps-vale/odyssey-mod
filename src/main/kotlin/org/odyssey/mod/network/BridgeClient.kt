@@ -530,8 +530,10 @@ internal class BridgeClient(
     private suspend fun authenticate(identity: LauncherIdentity): OdysseySession {
         OdysseyDiagnostics.logger.debug("[Odyssey Mod] Authenticating bridge session")
         val challenge = transport.challenge()
-        runInterruptible { game.joinServer(challenge.serverId) }
-        val authenticated = transport.complete(challenge.challengeId, identity.username)
+        val clientNonce = runInterruptible {
+            MinecraftSessionProof.join(transport.origin, challenge, game::joinServer)
+        }
+        val authenticated = transport.complete(challenge.challengeId, identity.username, clientNonce)
         if (!authenticated.minecraftUuid.equals(identity.uuid, ignoreCase = true)) {
             throw TransportException("identity_conflict", false, "Launcher and Mojang identities differ")
         }

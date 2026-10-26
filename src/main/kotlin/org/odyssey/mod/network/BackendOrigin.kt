@@ -1,10 +1,32 @@
 package org.odyssey.mod.network
 
+import com.google.common.net.InetAddresses
 import org.odyssey.mod.generated.BuildConfig
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.URI
 
 internal class BackendOrigin private constructor(val http: URI, val webSocket: URI) {
+    val proofAudience: String
+        get() {
+            val defaultPort = if (http.scheme == "https") 443 else 80
+            val port = if (http.port == defaultPort) -1 else http.port
+            val host = http.host.lowercase()
+            val canonicalHost = if (':' in host) {
+                val address = InetAddresses.forString(host.removeSurrounding("[", "]"))
+                // Java represents mapped IPv6 literals as IPv4; retain the URL's IPv6 form.
+                val ipv6 = if (address is Inet6Address) address else Inet6Address.getByAddress(
+                    null, ByteArray(16).also {
+                        it[10] = -1
+                        it[11] = -1
+                        address.address.copyInto(it, 12)
+                    }, -1,
+                )
+                InetAddresses.toAddrString(ipv6)
+            } else host
+            return URI(http.scheme, null, canonicalHost, port, null, null, null).toASCIIString()
+        }
+
     companion object {
         fun configured(runtimeOverride: String? = System.getProperty("odyssey.backend_url")): BackendOrigin {
             if (runtimeOverride != null && !BuildConfig.DEVELOPMENT) {

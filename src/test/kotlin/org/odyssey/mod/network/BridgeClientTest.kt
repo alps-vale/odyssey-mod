@@ -34,6 +34,50 @@ import kotlin.test.assertTrue
 class BridgeClientTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `backend cannot choose the hash authorized by the game`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, game, OdysseyConfig(),
+            scope = CoroutineScope(coroutineContext + SupervisorJob()))
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertEquals(1, game.joined.size)
+            kotlin.test.assertNotEquals("a".repeat(40), game.joined.single())
+            assertEquals(1, transport.completedNonces.size)
+            assertEquals(
+                MinecraftSessionProof.derive(transport.origin,
+                    "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+                    "a".repeat(40), transport.completedNonces.single()),
+                game.joined.single(),
+            )
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `legacy backend cannot trigger a game join or completion`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }.also { it.proofVersion = 0 }
+        val client = BridgeClient(transport, game, OdysseyConfig(),
+            scope = CoroutineScope(coroutineContext + SupervisorJob()))
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertEquals(1, transport.challengeCalls.get())
+            assertTrue(game.joined.isEmpty())
+            assertTrue(transport.completedNonces.isEmpty())
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `link rejection on a live connection closes it before polling`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }
@@ -1878,6 +1922,9 @@ class BridgeClientTest {
 }
 
 private class FakeTransport(private val identity: () -> LauncherIdentity) : OdysseyTransport {
+    override val origin = BackendOrigin.parse("https://odyssey.notes.supply", false)
+    var proofVersion = 2
+    val completedNonces = CopyOnWriteArrayList<String>()
     val challengeCalls = AtomicInteger()
     val sockets = CopyOnWriteArrayList<FakeSocket>()
     val openSocketCalls = AtomicInteger()
@@ -1899,10 +1946,11 @@ private class FakeTransport(private val identity: () -> LauncherIdentity) : Odys
 
     override suspend fun challenge(): MinecraftChallenge {
         challengeCalls.incrementAndGet()
-        return MinecraftChallenge("challenge-${challengeCalls.get()}", "a".repeat(40), 60)
+        return MinecraftChallenge("ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8", "a".repeat(40), 60, proofVersion)
     }
 
-    override suspend fun complete(challengeId: String, username: String): OdysseySession {
+    override suspend fun complete(challengeId: String, username: String, clientNonce: String): OdysseySession {
+        completedNonces += clientNonce
         completeFailure?.let { throw it }
         val current = identity()
         return OdysseySession(
@@ -2051,7 +2099,8 @@ private class FakeGame : GameAccess {
         identityFailure?.let { throw it }
         return identity
     }
-    override fun joinServer(serverId: String) = Unit
+    val joined = CopyOnWriteArrayList<String>()
+    override fun joinServer(serverId: String) { joined += serverId }
     override fun execute(action: () -> Unit) {
         executeCalls.incrementAndGet()
         action()
