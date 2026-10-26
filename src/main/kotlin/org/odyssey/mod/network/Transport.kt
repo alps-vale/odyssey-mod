@@ -19,8 +19,9 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 internal interface OdysseyTransport {
+    val origin: BackendOrigin
     suspend fun challenge(): MinecraftChallenge
-    suspend fun complete(challengeId: String, username: String): OdysseySession
+    suspend fun complete(challengeId: String, username: String, clientNonce: String): OdysseySession
     suspend fun online(token: String): GuildOnlineSnapshot
     suspend fun openSocket(token: String, events: SocketEvents): BridgeSocket
 }
@@ -46,6 +47,7 @@ internal data class MinecraftChallenge(
     @kotlinx.serialization.SerialName("challenge_id") val challengeId: String,
     @kotlinx.serialization.SerialName("server_id") val serverId: String,
     @kotlinx.serialization.SerialName("expires_in") val expiresIn: Long,
+    @kotlinx.serialization.SerialName("proof_version") val proofVersion: Int = 0,
 )
 
 @Serializable
@@ -64,7 +66,7 @@ internal class TransportException(
 ) : RuntimeException(message)
 
 internal class JavaOdysseyTransport(
-    private val origin: BackendOrigin,
+    override val origin: BackendOrigin,
     private val modVersion: String,
     private val client: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -79,10 +81,10 @@ internal class JavaOdysseyTransport(
         return restJson.decodeFromString(send(request))
     }
 
-    override suspend fun complete(challengeId: String, username: String): OdysseySession {
+    override suspend fun complete(challengeId: String, username: String, clientNonce: String): OdysseySession {
         val payload = restJson.encodeToString(
             CompleteRequest.serializer(),
-            CompleteRequest(challengeId, username),
+            CompleteRequest(challengeId, username, clientNonce),
         )
         val request = request("/api/v1/auth/minecraft/complete")
             .header("Content-Type", "application/json")
@@ -154,6 +156,7 @@ internal class JavaOdysseyTransport(
 private data class CompleteRequest(
     @kotlinx.serialization.SerialName("challenge_id") val challengeId: String,
     val username: String,
+    @kotlinx.serialization.SerialName("client_nonce") val clientNonce: String,
 )
 
 private class JavaSocketListener(private val events: SocketEvents) : WebSocket.Listener {
