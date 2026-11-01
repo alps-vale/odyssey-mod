@@ -33,6 +33,33 @@ import kotlin.test.assertTrue
 
 class GuildChatTest {
     @Test
+    fun `bridge rank opt out ignores Discord roles and keeps names in native colour`() {
+        for (source in ChatSource.entries) {
+            for (rank in listOf(null, "CHIEF")) {
+                val message = ServerMessage.Chat(PROTOCOL_VERSION,
+                    "88888888-8888-4888-8888-888888888888", source,
+                    if (source == ChatSource.WYNN) GuildRef("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Alps") else null,
+                    ChatAuthor(displayName = "Alice", role = RankPresentation("Sentinel", RankColors(0xFF0000)), wynnRank = rank),
+                    "hello", "2026-11-01T12:00:00Z")
+                val plain = BridgeChatRenderer.component(message, rankOverrides = false)
+                val otherRole = message.copy(author = message.author.copy(
+                    role = RankPresentation("Highlander", RankColors(0x00FF00, 0x0000FF))))
+                assertEquals(plain.string, BridgeChatRenderer.component(otherRole, rankOverrides = false).string)
+                assertTrue(plain.string.endsWith("Alice: hello"))
+                if (source == ChatSource.DISCORD) assertTrue('\uF8F2' in plain.string)
+                var nameColor: Int? = null
+                plain.visit(FormattedText.StyledContentConsumer<Unit> { style, text ->
+                    if (text == "Alice") nameColor = style.color?.value
+                    Optional.empty()
+                }, Style.EMPTY)
+                assertEquals(0x00AAAA, nameColor)
+                if (rank == null) assertTrue('\uE010' !in plain.string, "unknown ranks are omitted")
+                else assertTrue('\uE010' in plain.string, "known Wynncraft ranks are retained")
+            }
+        }
+    }
+
+    @Test
     fun `nickname hover requires a consistent identity for the exact visible name`() {
         fun message(hover: String): Component = fixture("guild_nickname.json").copy().also { message ->
             val wrapper = message.siblings[4].copy()

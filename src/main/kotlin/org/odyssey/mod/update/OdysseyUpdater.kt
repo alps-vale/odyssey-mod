@@ -19,13 +19,12 @@ internal data class UpdateNotice(val text: String, val action: Action? = null, v
 /** Checks only offer releases. Downloading always requires an explicit user action. */
 internal class OdysseyUpdater(
     private val version: String,
-    private var config: OdysseyConfig,
+    config: OdysseyConfig,
     private val notify: (UpdateNotice) -> Unit,
     private val files: UpdateFiles = FabricUpdateFiles(),
     private val worker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "Odyssey updates").apply { isDaemon = true }
     },
-    private val saveConfig: (OdysseyConfig) -> Unit = OdysseyConfig::save,
 ) {
     private val queued = AtomicInteger()
     private val scheduling = Any()
@@ -83,23 +82,8 @@ internal class OdysseyUpdater(
     }
 
     fun setChecks(enabled: Boolean) {
-        // Persist an opt-out even while the background worker is occupied.
-        if (!enabled) checksEnabled = false
-        synchronized(scheduling) { nextCheck?.cancel(false); nextCheck = null }
-        val next = config.copy(checkUpdates = enabled)
-        try { saveConfig(next) }
-        catch (error: Exception) {
-            OdysseyDiagnostics.logger.warn("[Odyssey Mod] Could not save update preference", error)
-            notify(UpdateNotice(if (enabled) "Couldn't save the update setting. Try again."
-                else "Update checks are disabled for this session, but the setting couldn't be saved. Try again.",
-                warning = true))
-            if (checksEnabled) scheduleNext()
-            return
-        }
-        config = next
         checksEnabled = enabled
-        notify(UpdateNotice(if (enabled) "Automatic update checks enabled. Downloads still need your approval."
-            else "Automatic update checks disabled."))
+        synchronized(scheduling) { nextCheck?.cancel(false); nextCheck = null }
         if (enabled) submit(false, queue = true, automaticRun = true) {
             if (checksEnabled) checkRelease(false)
         }

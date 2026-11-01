@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Change all four settings in game with `/odyssey config`, with tab completion and no restart.
+- Turning off Discord rank overrides also applies to incoming bridge messages, not just native guild chat.
+
 ## 0.3.12
 
 - Important update: update Odyssey and restart Minecraft to keep connecting to the updated backend. Your linked account is preserved.

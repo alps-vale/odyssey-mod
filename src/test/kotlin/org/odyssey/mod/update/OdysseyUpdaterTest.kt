@@ -140,16 +140,14 @@ class OdysseyUpdaterTest {
         assertTrue(s.files.downloads.isEmpty())
     }
 
-    @Test fun `opt-out persists immediately while the worker is occupied`() = session { s ->
+    @Test fun `opting out while the worker is occupied prevents queued checks`() = session { s ->
         val entered = CountDownLatch(1)
         val releaseWorker = CountDownLatch(1)
-        val path = root.resolve("config/odyssey/config.json")
         try {
             s.worker.execute { entered.countDown(); releaseWorker.await(5, TimeUnit.SECONDS) }
             assertTrue(entered.await(2, TimeUnit.SECONDS))
             s.updater.setChecks(true)
             s.updater.setChecks(false)
-            assertFalse(OdysseyConfig.load(path).checkUpdates)
             assertEquals(1L, releaseWorker.count)
             releaseWorker.countDown()
             s.drain()
@@ -196,12 +194,11 @@ class OdysseyUpdaterTest {
     }
 
     private fun session(enabled: Boolean = true, test: (Session) -> Unit) {
-        val path = root.resolve("config/odyssey/config.json")
         val worker = ControlledWorker()
         val files = FakeFiles()
         val notices = CopyOnWriteArrayList<UpdateNotice>()
-        val updater = OdysseyUpdater("0.3.3", OdysseyConfig(checkUpdates = enabled), notices::add,
-            files, worker) { OdysseyConfig.save(it, path) }
+        val config = OdysseyConfig(checkUpdates = enabled)
+        val updater = OdysseyUpdater("0.3.3", config, notices::add, files, worker)
         try { test(Session(updater, files, worker, notices)) }
         finally { updater.stop(); assertTrue(worker.awaitTermination(2, TimeUnit.SECONDS)) }
     }
