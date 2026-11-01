@@ -82,10 +82,8 @@ internal class OdysseyUpdater(
     }
 
     fun setChecks(enabled: Boolean) {
-        // Honor an opt-out even while the background worker is occupied.
-        if (!enabled) checksEnabled = false
-        synchronized(scheduling) { nextCheck?.cancel(false); nextCheck = null }
         checksEnabled = enabled
+        synchronized(scheduling) { nextCheck?.cancel(false); nextCheck = null }
         if (enabled) submit(false, queue = true, automaticRun = true) {
             if (checksEnabled) checkRelease(false)
         }

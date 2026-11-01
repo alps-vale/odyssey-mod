@@ -59,4 +59,4 @@ Use `/odyssey config` to change settings while playing. Changes take effect imme
 
 The four keys are `autoConnect`, `bridgeVisible`, `discordRankOverrides`, and `checkUpdates`, all defaulting to `true`. Close Minecraft before editing the file by hand. If a change cannot be saved, it still applies for the current session and the command reports the save failure; running it again retries the save.
 
-Setting `discordRankOverrides` to `false` keeps native Wynncraft rank and name styling in guild chat instead of replacing it with Discord ranks. Bridge messages between the guilds and in Discord stay as they are. The `updates/` subfolder is the release cache.
+Setting `discordRankOverrides` to `false` keeps native Wynncraft styling in guild chat and removes custom Discord ranks and name gradients from incoming bridge messages. Bridge messages keep their source marker and use the Wynncraft rank when one is available; otherwise no rank is shown. This only changes your in-game display, not messages posted to Discord. The `updates/` subfolder is the release cache.

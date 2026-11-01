@@ -11,7 +11,7 @@ internal enum class OdysseySetting(
     CHECK_UPDATES("checkUpdates", { it.checkUpdates }, { config, value -> config.copy(checkUpdates = value) }),
 }
 
-/** Client-thread settings owner shared by commands and settings screens. */
+/** Client-thread owner of live settings. */
 internal class OdysseySettings(
     initial: OdysseyConfig,
     private val save: (OdysseyConfig) -> Unit = OdysseyConfig::save,
@@ -24,10 +24,10 @@ internal class OdysseySettings(
     fun set(setting: OdysseySetting, enabled: Boolean) {
         val next = setting.write(current, enabled)
         if (next != current) {
-            current = next
-            unsaved = true
             // An update-check opt-out takes effect even if the disk is unwritable.
             apply(setting, next)
+            current = next
+            unsaved = true
         }
         if (unsaved) {
             save(current)

@@ -303,11 +303,15 @@ internal class BridgeClient(
                 when (command) {
                     is Command.Environment -> environment(command)
                     is Command.Configure -> {
-                        val reconnect = config.autoConnect != command.config.autoConnect
+                        val autoConnectChanged = config.autoConnect != command.config.autoConnect
                         config = command.config
-                        if (reconnect) {
+                        if (autoConnectChanged) {
                             pending.clear()
                             chatScope.incrementAndGet()
+                            if (config.autoConnect) {
+                                stoppedByTerminalError = false
+                                reconnectAttempt = 0
+                            }
                             environment(Command.Environment(serverAddress, playable))
                         }
                     }

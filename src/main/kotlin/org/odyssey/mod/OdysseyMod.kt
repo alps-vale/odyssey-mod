@@ -63,7 +63,9 @@ object OdysseyMod : ClientModInitializer {
         GuildChatDecorator.enabled = config.discordRankOverrides
         bridge = BridgeClient(
             JavaOdysseyTransport(origin, version),
-            MinecraftGameAccess(chatRenderer = BridgeChatRenderer::render),
+            MinecraftGameAccess(chatRenderer = { message ->
+                BridgeChatRenderer.render(message, settings.current.discordRankOverrides)
+            }),
             config,
         )
         ClientTickEvents.END_CLIENT_TICK.register { minecraft ->

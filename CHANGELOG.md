@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Change all four settings in game with `/odyssey config`, with tab completion and no restart.
+- Turning off Discord rank overrides also applies to incoming bridge messages, not just native guild chat.
 
 ## 0.3.12
 

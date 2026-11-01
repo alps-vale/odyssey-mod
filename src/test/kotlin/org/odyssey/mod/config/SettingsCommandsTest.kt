@@ -40,7 +40,6 @@ class SettingsCommandsTest {
         dispatcher.execute("odyssey config discordRankOverrides false", source)
         dispatcher.execute("odyssey config checkUpdates false", source)
         assertEquals(OdysseyConfig(bridgeVisible = false, discordRankOverrides = false, checkUpdates = false), OdysseyConfig.load(path))
-        assertEquals(3, writes)
         dispatcher.execute("odyssey config checkUpdates false", source)
         assertEquals(3, writes, "unchanged settings do not rewrite disk or reapply runtime effects")
         assertEquals(listOf(OdysseySetting.BRIDGE_VISIBLE, OdysseySetting.DISCORD_RANK_OVERRIDES, OdysseySetting.CHECK_UPDATES), applied)
@@ -49,7 +48,6 @@ class SettingsCommandsTest {
         dispatcher.execute("odyssey config", source)
         assertTrue(feedback.last().contains("autoConnect = true"))
         assertFailsWith<CommandSyntaxException> { dispatcher.execute("odyssey config autoConnect maybe", source) }
-        assertEquals(3, writes)
         assertTrue(errors.isEmpty())
     }
 

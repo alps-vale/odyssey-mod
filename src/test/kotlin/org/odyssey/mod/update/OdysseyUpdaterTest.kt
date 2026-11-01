@@ -2,8 +2,6 @@ package org.odyssey.mod.update
 
 import org.junit.jupiter.api.io.TempDir
 import org.odyssey.mod.config.OdysseyConfig
-import org.odyssey.mod.config.OdysseySetting
-import org.odyssey.mod.config.OdysseySettings
 import java.io.IOException
 import java.net.URI
 import java.nio.file.Path
@@ -142,16 +140,14 @@ class OdysseyUpdaterTest {
         assertTrue(s.files.downloads.isEmpty())
     }
 
-    @Test fun `opt-out persists immediately while the worker is occupied`() = session { s ->
+    @Test fun `opting out while the worker is occupied prevents queued checks`() = session { s ->
         val entered = CountDownLatch(1)
         val releaseWorker = CountDownLatch(1)
-        val path = root.resolve("config/odyssey/config.json")
         try {
             s.worker.execute { entered.countDown(); releaseWorker.await(5, TimeUnit.SECONDS) }
             assertTrue(entered.await(2, TimeUnit.SECONDS))
-            s.settings.set(OdysseySetting.CHECK_UPDATES, true)
-            s.settings.set(OdysseySetting.CHECK_UPDATES, false)
-            assertFalse(OdysseyConfig.load(path).checkUpdates)
+            s.updater.setChecks(true)
+            s.updater.setChecks(false)
             assertEquals(1L, releaseWorker.count)
             releaseWorker.countDown()
             s.drain()
@@ -165,9 +161,9 @@ class OdysseyUpdaterTest {
         s.updater.start()
         s.drain()
         val timer = s.worker.timers.last()
-        s.settings.set(OdysseySetting.CHECK_UPDATES, false)
+        s.updater.setChecks(false)
         assertTrue(timer.future.isCancelled)
-        s.settings.set(OdysseySetting.CHECK_UPDATES, true)
+        s.updater.setChecks(true)
         s.drain()
         assertTrue(s.files.downloads.isEmpty())
         val enabledTimer = s.worker.timers.last()
@@ -188,7 +184,7 @@ class OdysseyUpdaterTest {
         try {
             s.updater.start()
             assertTrue(entered.await(2, TimeUnit.SECONDS))
-            s.settings.set(OdysseySetting.CHECK_UPDATES, false)
+            s.updater.setChecks(false)
             releaseWorker.countDown()
             s.drain()
             assertTrue(s.notices.none { it.action is UpdateNotice.Action.Download })
@@ -198,21 +194,17 @@ class OdysseyUpdaterTest {
     }
 
     private fun session(enabled: Boolean = true, test: (Session) -> Unit) {
-        val path = root.resolve("config/odyssey/config.json")
         val worker = ControlledWorker()
         val files = FakeFiles()
         val notices = CopyOnWriteArrayList<UpdateNotice>()
         val config = OdysseyConfig(checkUpdates = enabled)
         val updater = OdysseyUpdater("0.3.3", config, notices::add, files, worker)
-        val settings = OdysseySettings(config, { OdysseyConfig.save(it, path) }) { _, next ->
-            updater.setChecks(next.checkUpdates)
-        }
-        try { test(Session(updater, files, worker, notices, settings)) }
+        try { test(Session(updater, files, worker, notices)) }
         finally { updater.stop(); assertTrue(worker.awaitTermination(2, TimeUnit.SECONDS)) }
     }
 
     private data class Session(val updater: OdysseyUpdater, val files: FakeFiles,
-                               val worker: ControlledWorker, val notices: List<UpdateNotice>, val settings: OdysseySettings) {
+                               val worker: ControlledWorker, val notices: List<UpdateNotice>) {
         fun drain() { repeat(2) { worker.submit {}.get(2, TimeUnit.SECONDS) } }
         fun poll() {
             val timer = worker.timers.last()

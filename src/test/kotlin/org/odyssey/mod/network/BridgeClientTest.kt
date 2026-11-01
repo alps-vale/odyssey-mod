@@ -34,6 +34,35 @@ import kotlin.test.assertTrue
 class BridgeClientTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `explicitly enabling auto connect retries after a terminal rejection`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }.also {
+            it.completeFailure = TransportException("not_in_odyssey", false, "No eligible guild role")
+        }
+        val client = BridgeClient(transport, game, OdysseyConfig(),
+            scope = CoroutineScope(coroutineContext + SupervisorJob()))
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertTrue(client.status() is BridgeStatus.Terminal)
+            transport.completeFailure = null
+            client.updateConfig(OdysseyConfig(autoConnect = false))
+            runCurrent()
+            assertEquals(BridgeStatus.Idle, client.status())
+            client.updateConfig(OdysseyConfig())
+            runCurrent()
+            assertEquals(1, transport.sockets.size)
+            transport.sendWelcome(0)
+            runCurrent()
+            assertTrue(client.status() is BridgeStatus.Connected)
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `settings reconnect and hide chat without a game restart`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }

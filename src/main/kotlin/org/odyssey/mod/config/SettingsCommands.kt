@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 import net.minecraft.network.chat.Component
 import org.odyssey.mod.OdysseyDiagnostics
+import java.io.IOException
 
 internal object SettingsCommands {
     fun tree(settings: OdysseySettings) = literal("config")
@@ -33,7 +34,7 @@ internal object SettingsCommands {
             settings.set(setting, enabled)
             source.sendFeedback(Component.literal("${setting.key} = $enabled"))
             Command.SINGLE_SUCCESS
-        } catch (error: Exception) {
+        } catch (error: IOException) {
             OdysseyDiagnostics.logger.warn("[Odyssey Mod] Could not save setting {}", setting.key, error)
             source.sendError(Component.literal("${setting.key} = $enabled for this session, but couldn't save config.json. Try again."))
             0
