@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Change all four settings in game with `/odyssey config`, with tab completion and no restart.
+
 ## 0.3.12
 
 - Important update: update Odyssey and restart Minecraft to keep connecting to the updated backend. Your linked account is preserved.

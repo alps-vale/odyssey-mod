@@ -34,6 +34,59 @@ import kotlin.test.assertTrue
 class BridgeClientTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `settings reconnect and hide chat without a game restart`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(transport, game, OdysseyConfig(autoConnect = false),
+            scope = CoroutineScope(coroutineContext + SupervisorJob()))
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            assertTrue(transport.sockets.isEmpty())
+            client.updateConfig(OdysseyConfig())
+            runCurrent()
+            assertEquals(1, transport.sockets.size)
+            transport.sendWelcome(0)
+            runCurrent()
+
+            fun message(id: String) = ServerMessage.Chat(PROTOCOL_VERSION, id, ChatSource.DISCORD,
+                author = ChatAuthor(discordId = "10", displayName = "Alice"),
+                content = "hello", sentAt = "2026-11-01T12:00:00Z")
+            client.updateConfig(OdysseyConfig(bridgeVisible = false))
+            transport.send(0, message("11111111-1111-4111-8111-111111111111"))
+            runCurrent()
+            assertTrue(game.rendered.isEmpty())
+            assertFalse(transport.sockets.single().closed, "hiding chat keeps the bridge connected")
+            client.updateConfig(OdysseyConfig())
+            transport.send(0, message("22222222-2222-4222-8222-222222222222"))
+            runCurrent()
+            assertEquals(1, game.rendered.size)
+            assertEquals(1, transport.sockets.size)
+
+            client.observe(client.chatOrigin(BridgeClient.WYNNCRAFT_ADDRESS), "Alice", "queued before disabling")
+            runCurrent()
+            val observation = transport.sockets.single().sent.map { ProtocolCodec.decodeClient(ProtocolFrame.Text(it)) }
+                .filterIsInstance<ClientMessage.GuildObservation>().single()
+            client.updateConfig(OdysseyConfig(autoConnect = false))
+            runCurrent()
+            assertTrue(transport.sockets.single().closed)
+            assertEquals(BridgeStatus.Idle, client.status())
+            assertFalse(client.acceptsObservations(client.chatOrigin(BridgeClient.WYNNCRAFT_ADDRESS)))
+            client.updateConfig(OdysseyConfig())
+            runCurrent()
+            assertEquals(2, transport.sockets.size)
+            transport.sendWelcome(1)
+            runCurrent()
+            assertFalse(transport.sockets[1].sent.any { it.contains(observation.id) },
+                "explicitly disabling the bridge discards its pending observations")
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `backend cannot choose the hash authorized by the game`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }

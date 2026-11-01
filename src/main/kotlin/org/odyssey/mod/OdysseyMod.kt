@@ -14,6 +14,9 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
 import org.odyssey.mod.config.OdysseyConfig
+import org.odyssey.mod.config.OdysseySetting
+import org.odyssey.mod.config.OdysseySettings
+import org.odyssey.mod.config.SettingsCommands
 import org.odyssey.mod.chat.BridgeChatRenderer
 import org.odyssey.mod.chat.OdysseyNotifications
 import org.odyssey.mod.chat.GuildChatDecorator
@@ -33,6 +36,7 @@ object OdysseyMod : ClientModInitializer {
     private var lastAddress: String? = null
     private var lastPlayable = false
     private lateinit var updater: OdysseyUpdater
+    private lateinit var settings: OdysseySettings
     private val updateNotices = ArrayDeque<UpdateNotice>()
     private val guildEventActors = GuildEventActors()
 
@@ -45,6 +49,13 @@ object OdysseyMod : ClientModInitializer {
             .version
             .friendlyString
         val config = OdysseyConfig.load()
+        settings = OdysseySettings(config) { setting, next ->
+            when (setting) {
+                OdysseySetting.AUTO_CONNECT, OdysseySetting.BRIDGE_VISIBLE -> bridge.updateConfig(next)
+                OdysseySetting.DISCORD_RANK_OVERRIDES -> GuildChatDecorator.enabled = next.discordRankOverrides
+                OdysseySetting.CHECK_UPDATES -> updater.setChecks(next.checkUpdates)
+            }
+        }
         updater = OdysseyUpdater(version, config, notify = { notice ->
             Minecraft.getInstance().execute { updateNotices.addLast(notice) }
         })
@@ -86,6 +97,7 @@ object OdysseyMod : ClientModInitializer {
             OdysseyDiagnostics.callback("client command registration") {
                 dispatcher.register(
                     literal("odyssey")
+                        .then(SettingsCommands.tree(settings))
                         .then(
                             literal("update")
                                 .executes { context ->
@@ -102,8 +114,8 @@ object OdysseyMod : ClientModInitializer {
                                     }))
                                 .then(
                                     literal("checks")
-                                        .then(literal("on").executes { updater.setChecks(true); Command.SINGLE_SUCCESS })
-                                        .then(literal("off").executes { updater.setChecks(false); Command.SINGLE_SUCCESS }),
+                                        .then(literal("on").executes { SettingsCommands.set(it.source, settings, OdysseySetting.CHECK_UPDATES, true) })
+                                        .then(literal("off").executes { SettingsCommands.set(it.source, settings, OdysseySetting.CHECK_UPDATES, false) }),
                                 ),
                         )
                         .then(

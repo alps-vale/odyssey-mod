@@ -22,6 +22,7 @@ In Minecraft:
 - `/odyssey reconnect` retries the connection immediately.
 - `/odyssey update` shows update status. `/odyssey update check` checks for a new release, and `/odyssey update download` downloads it for installation when Minecraft closes.
 - `/odyssey update checks on` or `off` turns automatic update checks on or off.
+- `/odyssey config` lists settings. `/odyssey config <setting>` shows a value, and `/odyssey config <setting> <true|false>` changes it. Tab completes both the setting names and values.
 
 If the bridge stays disconnected, check your linked profile and guild role, then run `/odyssey reconnect`.
 
@@ -54,6 +55,8 @@ If an update fails, run `/odyssey update download` to retry. To roll back, close
 
 ## Settings
 
-Settings live in `config/odyssey/config.json`. Close Minecraft before editing the file. The four keys are `autoConnect`, `bridgeVisible`, `discordRankOverrides`, and `checkUpdates`, all defaulting to `true`.
+Use `/odyssey config` to change settings while playing. Changes take effect immediately and are saved in `config/odyssey/config.json`. For example, `/odyssey config bridgeVisible false` hides incoming bridge messages without disconnecting. `/odyssey config autoConnect false` disconnects the bridge and discards queued observations; setting it to `true` reconnects while on Wynncraft.
+
+The four keys are `autoConnect`, `bridgeVisible`, `discordRankOverrides`, and `checkUpdates`, all defaulting to `true`. Close Minecraft before editing the file by hand. If a change cannot be saved, it still applies for the current session and the command reports the save failure; running it again retries the save.
 
 Setting `discordRankOverrides` to `false` keeps native Wynncraft rank and name styling in guild chat instead of replacing it with Discord ranks. Bridge messages between the guilds and in Discord stay as they are. The `updates/` subfolder is the release cache.

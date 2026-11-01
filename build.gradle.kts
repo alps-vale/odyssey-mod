@@ -146,6 +146,7 @@ val nativeTestBundle by tasks.registering(Zip::class) {
     from(sourceSets.main.get().output) {
         into("classes")
         include("org/odyssey/mod/update/**", "org/odyssey/mod/config/OdysseyConfig*",
+            "org/odyssey/mod/config/OdysseySetting*",
             "org/odyssey/mod/OdysseyDiagnostics*", "odyssey-update.pub", "updates/**")
     }
     from(sourceSets.test.get().output) {

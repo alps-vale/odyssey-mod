@@ -173,10 +173,11 @@ internal object PresentationRepository {
 internal class BridgeClient(
     private val transport: OdysseyTransport,
     private val game: GameAccess,
-    private val config: OdysseyConfig,
+    config: OdysseyConfig,
     private val reconnectPolicy: ReconnectPolicy = ReconnectPolicy(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : SocketEvents {
+    @Volatile private var config: OdysseyConfig = config
     private val commands = Channel<Command>(Channel.UNLIMITED)
     private val queuedObservations = AtomicInteger()
     private val pending = PendingObservations(100)
@@ -223,6 +224,10 @@ internal class BridgeClient(
     fun updateEnvironment(address: String?, playable: Boolean) {
         onlineDisplayEpoch.incrementAndGet()
         commands.trySend(Command.Environment(address, playable))
+    }
+
+    fun updateConfig(config: OdysseyConfig) {
+        commands.trySend(Command.Configure(config))
     }
 
     fun observe(origin: ChatOrigin, authorUsername: String, content: String, itemShares: List<ItemShare> = emptyList()) {
@@ -297,6 +302,15 @@ internal class BridgeClient(
             try {
                 when (command) {
                     is Command.Environment -> environment(command)
+                    is Command.Configure -> {
+                        val reconnect = config.autoConnect != command.config.autoConnect
+                        config = command.config
+                        if (reconnect) {
+                            pending.clear()
+                            chatScope.incrementAndGet()
+                            environment(Command.Environment(serverAddress, playable))
+                        }
+                    }
                     is Command.Observe -> try {
                         observation(command)
                     } finally {
@@ -665,7 +679,7 @@ internal class BridgeClient(
                 }
             }
             is ServerMessage.Chat -> if (seenEvents.add(message.eventId) && config.bridgeVisible) {
-                game.execute { game.renderChat(message) }
+                game.execute { if (config.bridgeVisible) game.renderChat(message) }
             }
             is ServerMessage.PresentationUpsert -> updatePresentation(message.revision) { entries ->
                 entries[message.presentation.minecraftUuid] = message.presentation
@@ -1077,6 +1091,7 @@ internal class BridgeClient(
     }
 
     private sealed interface Command {
+        data class Configure(val config: OdysseyConfig) : Command
         data class Environment(val address: String?, val playable: Boolean) : Command
         data class Observe(
             val origin: ChatOrigin,
