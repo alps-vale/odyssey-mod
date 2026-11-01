@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.13
 
 - Change all four settings in game with `/odyssey config`, with tab completion and no restart.
-- Turning off Discord rank overrides also applies to incoming bridge messages, not just native guild chat.
+- Turning off Discord rank overrides also applies to incoming bridge messages, not just native guild chat. Use `/odyssey config discordRankOverrides false` for native-style names and ranks.
+- Turning automatic connection off and back on retries a previously rejected connection.
 
 ## 0.3.12
 
