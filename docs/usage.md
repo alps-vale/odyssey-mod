@@ -4,7 +4,9 @@
 
 ## Install
 
-You need Minecraft 1.21.11, Java 21+, Fabric Loader 0.19.3+, Fabric API 0.141.6+1.21.11, and Fabric Language Kotlin 1.13.13+kotlin.2.4.10.
+You need Minecraft 1.21.11, Java 21, Fabric Loader 0.19.3+, Fabric API 0.141.6+1.21.11, and Fabric Language Kotlin 1.13.13+kotlin.2.4.10.
+
+Use a Java 21 build based on OpenJDK 21.0.13.1 or later, which fixes CVE-2026-114938. Examples are Corretto 21.0.13.1.2, Zulu 21.54.201, and Oracle 21.0.13.1. `java -version` shows your build. Fabric checks only the Java feature version, so it can't refuse an unpatched Java 21. If no patched build is available for your Java vendor yet, add `-XX:-UseBASE64Intrinsics` to your JVM arguments until you can update.
 
 1. Download [odyssey-mod.jar](https://github.com/alps-vale/odyssey-mod/releases/latest/download/odyssey-mod.jar).
 2. Put it and the required Fabric mods in your instance's `mods` folder. Keep only one Odyssey JAR installed.
