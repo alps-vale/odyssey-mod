@@ -38,29 +38,29 @@ url_api = "https://api.github.com/repos/rhysd/actionlint/releases/assets/3849249
 provenance = "github-attestations"
 
 [[tools.java]]
-version = "temurin-21.0.12+8.0.LTS"
+version = "corretto-21.0.13.1.2"
 backend = "core:java"
-specifiers = ["temurin-21.0.12+8.0.LTS"]
+specifiers = ["corretto-21.0.13.1.2"]
 
 [tools.java."platforms.linux-arm64"]
-checksum = "sha256:eba38e871b02d407897bfe017ea35352dfc1420ef6d2112425b0c67325ca509d"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.12_8.tar.gz"
+checksum = "sha256:55751c47c7e3be3b33af43ccdcf3a6f4814d308390b7400477594d421bd16a53"
+url = "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-linux-aarch64.tar.gz"
 
 [tools.java."platforms.linux-x64"]
-checksum = "sha256:e4446ff06a276155697597cc0f1b15da004ff083f4964a35271ecee567177370"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12_8.tar.gz"
+checksum = "sha256:2aaa2a9a43143b20ff0b28c8d0da27407b97dc40b160d9a2f60a26965815e948"
+url = "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-linux-x64.tar.gz"
 
 [tools.java."platforms.macos-arm64"]
-checksum = "sha256:021d629349ebc12a409faa517b837ec80ceee8f58a5ac85c788ecad07ca6881c"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12_8.tar.gz"
+checksum = "sha256:3e566c5b2760dc4f2199ac68b09a1b7c5381f228a336f3514a1aad4c113d474a"
+url = "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-macosx-aarch64.tar.gz"
 
 [tools.java."platforms.macos-x64"]
-checksum = "sha256:6b85c260eea574a995eacd0b3ee23c8042aa93b23a08e6478edafca0a0333d7f"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/OpenJDK21U-jdk_x64_mac_hotspot_21.0.12_8.tar.gz"
+checksum = "sha256:83095d9de2fe412151eede49e0373eeb5290bc0b82cc60cedb35e1da2d0a5ecc"
+url = "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-macosx-x64.tar.gz"
 
 [tools.java."platforms.windows-x64"]
-checksum = "sha256:9ba963ee2371874a74185d18bc7bb2ab9407df7683300855ed7606e0662321d0"
-url = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12_8.zip"
+checksum = "sha256:e91d8d38fe7af1e13ddde5c65d6c0cdd62d68fe091e9003464f5b45c422fb683"
+url = "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-windows-x64-jdk.zip"
 
 [[tools.python]]
 version = "3.13.16"
