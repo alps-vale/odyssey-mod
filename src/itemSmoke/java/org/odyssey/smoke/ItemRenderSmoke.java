@@ -92,6 +92,7 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                 Component second = Component.literal(reference).withStyle(style -> style.withHoverEvent(new HoverEvent.ShowItem(variant)));
                 String content = (encoded == null ? "" : encoded + " ") + reference + " " + reference;
                 int expected = encoded == null ? 2 : 3;
+                String originalCode = encoded;
                 Class<?> capture = Class.forName("org.odyssey.mod.item.ItemSharing");
                 Method method = capture.getMethod("capture", List.class, String.class, Function1.class);
                 // An unsupported wire version must not interrupt ordinary chat/capture.
@@ -114,6 +115,8 @@ public final class ItemRenderSmoke implements ClientModInitializer {
                             String png = (String) share.getClass().getMethod("getPng").invoke(share);
                             if (png == null) throw new IllegalStateException("Tooltip render timed out or exceeded bounds");
                             String kind = share.getClass().getMethod("getKind").invoke(share).toString();
+                            if (kind.equals("WYNNTILS") && !originalCode.equals(share.getClass().getMethod("getEncoded").invoke(share)))
+                                throw new IllegalStateException("Rendered share lost its original copy code");
                             checkDrawnBounds(Base64.getDecoder().decode(png), kind);
                             int color = (int) share.getClass().getMethod("getColor").invoke(share);
                             int expectedColor = kind.equals("WYNNTILS") ? 0xAA00AA : 0xFF55FF;
@@ -333,13 +336,22 @@ public final class ItemRenderSmoke implements ClientModInitializer {
             Object type = possibleType.getMethod("statType").invoke(stat);
             int value = (int) calculator.getMethod("calculateStatValue", int.class, possibleType).invoke(null, 100, stat);
             Object range = calculator.getMethod("calculateInternalRollRange", possibleType, int.class, boolean.class).invoke(null, stat, value, false);
-            rolls.add(actualType.getConstructor(statType, int.class, boolean.class, rangeType).newInstance(type, value, false, range));
+            try {
+                rolls.add(actualType.getConstructor(statType, int.class, rangeType, boolean.class).newInstance(type, value, range, false));
+            } catch (NoSuchMethodException legacyApi) {
+                rolls.add(actualType.getConstructor(statType, int.class, boolean.class, rangeType).newInstance(type, value, false, range));
+            }
         }
         Class<?> infoType = Class.forName("com.wynntils.models.gear.type.GearInfo");
         Class<?> instanceType = Class.forName("com.wynntils.models.gear.type.GearInstance");
-        Class<?> requirementsType = Class.forName("com.wynntils.models.gear.type.GearInstanceRequirements");
-        Object instance = instanceType.getMethod("create", infoType, List.class, List.class, int.class, Optional.class, requirementsType, Optional.class)
-            .invoke(null, info, rolls, List.of(), 2, Optional.empty(), requirementsType.getField("UNKNOWN").get(null), Optional.empty());
+        Object instance;
+        try {
+            instance = instanceType.getMethod("create", infoType, List.class, int.class).invoke(null, info, rolls, 2);
+        } catch (NoSuchMethodException legacyApi) {
+            Class<?> requirementsType = Class.forName("com.wynntils.models.gear.type.GearInstanceRequirements");
+            instance = instanceType.getMethod("create", infoType, List.class, List.class, int.class, Optional.class, requirementsType, Optional.class)
+                .invoke(null, info, rolls, List.of(), 2, Optional.empty(), requirementsType.getField("UNKNOWN").get(null), Optional.empty());
+        }
         Object item = Class.forName("com.wynntils.models.items.items.game.GearItem").getConstructor(infoType, instanceType).newInstance(info, instance);
         return encodeFixture(item);
     }
@@ -363,10 +375,23 @@ public final class ItemRenderSmoke implements ClientModInitializer {
         Class<?> instanceRequirements = Class.forName("com.wynntils.models.gear.type.GearInstanceRequirements");
         Class<?> durability = Class.forName("com.wynntils.utils.type.CappedValue");
         Class<?> type = Class.forName("com.wynntils.models.gear.type.GearType");
-        Object crafted = Class.forName("com.wynntils.models.items.items.game.CraftedGearItem")
-            .getConstructors()[0].newInstance("Crafted colour fixture", type.getField("CHESTPLATE").get(null),
-                null, 0, 4000, List.of(), List.of(), required, List.of(), List.of(), List.of(), 0,
-                instanceRequirements.getField("UNKNOWN").get(null), durability.getConstructor(int.class, int.class).newInstance(100, 100), 0);
+        Class<?> craftedType = Class.forName("com.wynntils.models.items.items.game.CraftedGearItem");
+        Class<?> speed = Class.forName("com.wynntils.models.gear.type.GearAttackSpeed");
+        Object chestplate = type.getField("CHESTPLATE").get(null);
+        Object capped = durability.getConstructor(int.class, int.class).newInstance(100, 100);
+        Object crafted;
+        try {
+            crafted = craftedType.getConstructor(String.class, type, int.class, int.class, durability, speed,
+                    List.class, List.class, requirements, instanceRequirements, List.class, int.class)
+                .newInstance("Crafted colour fixture", chestplate, 0, 4000, capped, null, List.of(), List.of(), required,
+                    instanceRequirements.getConstructor(boolean.class, boolean.class, java.util.Map.class, boolean.class)
+                        .newInstance(true, true, java.util.Map.of(), true), List.of(), 0);
+        } catch (NoSuchMethodException legacyApi) {
+            crafted = craftedType.getConstructor(String.class, type, speed, int.class, int.class, List.class,
+                    List.class, requirements, List.class, List.class, List.class, int.class, instanceRequirements, durability, int.class)
+                .newInstance("Crafted colour fixture", chestplate, null, 0, 4000, List.of(), List.of(), required,
+                    List.of(), List.of(), List.of(), 0, instanceRequirements.getField("UNKNOWN").get(null), capped, 0);
+        }
         List<String> codes = List.of(mythic, encodedFixture("Blue Mask"), encodeFixture(crafted));
         Class<?> access = Class.forName("org.odyssey.mod.item.ItemSharing$WynntilsAccess");
         var constructor = access.getDeclaredConstructor();
