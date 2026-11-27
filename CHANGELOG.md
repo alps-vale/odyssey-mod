@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.15
+
+- Restore shared item previews in guild chat with Wynntils 4.2.17 and 4.2.18. Earlier supported versions still work.
+- Forward the original guild chat text without previews when an item preview cannot be sent, instead of dropping the message.
+
 ## 0.3.14
 
 - Build Odyssey with a patched Java 21 for CVE-2026-114938. This doesn't update the Java your game runs on: use Java 21.0.13.1, 25.0.5.1, 27.0.1.1, or a later update of your Java version. The setup guide lists builds and a temporary workaround.

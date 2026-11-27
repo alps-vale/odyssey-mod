@@ -447,8 +447,15 @@ internal class BridgeClient(
     private fun supportsEvent(event: GuildEvent): Boolean =
         guildEvents && (!event.requiresManagementCapability() || guildManagementEvents)
 
+    private fun validatedObservation(message: ClientMessage.Observation): ClientMessage.Observation = try {
+        message.also { ProtocolCodec.encode(it) }
+    } catch (invalid: IllegalArgumentException) {
+        if (message !is ClientMessage.GuildObservation || message.itemShares.isEmpty()) throw invalid
+        message.copy(itemShares = emptyList()).also { ProtocolCodec.encode(it) }
+    }
+
     private fun submit(message: ClientMessage.Observation) {
-        runCatching { ProtocolCodec.encode(message) }.getOrElse { error ->
+        val outgoing = runCatching { validatedObservation(message) }.getOrElse { error ->
             OdysseyDiagnostics.logger.error("[Odyssey Mod] Guild observation encoding failed", error)
             game.showWarning(
                 BridgeWarning(
@@ -458,8 +465,8 @@ internal class BridgeClient(
             )
             return
         }
-        pending.add(message)
-        if (welcomed) send(message) else if (eligible() && !stoppedByTerminalError) connectIfEligible()
+        pending.add(outgoing)
+        if (welcomed) send(outgoing) else if (eligible() && !stoppedByTerminalError) connectIfEligible()
     }
 
     private fun requestOnline(command: Command.Online) {

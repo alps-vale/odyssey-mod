@@ -738,6 +738,47 @@ class BridgeClientTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `invalid previews fall back to one replayable chat without weakening validation`() = runTest {
+        val game = FakeGame()
+        val transport = FakeTransport { game.identity }
+        val client = BridgeClient(
+            transport, game, OdysseyConfig(), ReconnectPolicy { it },
+            scope = CoroutineScope(coroutineContext + SupervisorJob()),
+        )
+        fun chats(index: Int) = transport.sockets[index].sent
+            .map { ProtocolCodec.decodeClient(ProtocolFrame.Text(it)) }
+            .filterIsInstance<ClientMessage.GuildObservation>()
+        try {
+            client.updateEnvironment(BridgeClient.WYNNCRAFT_ADDRESS, true)
+            runCurrent()
+            transport.sendWelcome(0)
+            runCurrent()
+            val share = ItemShare(ItemShareKind.WYNNTILS, "[Bow]", "Bow", 0xffffff, null)
+            client.observeOnWynncraft("Alice", "first [Bow]", listOf(share))
+            client.observeOnWynncraft("Bob", "second [Bow]", listOf(share, share))
+            client.observeOnWynncraft("Bob", "invalid\n[Bow]", listOf(share, share))
+            runCurrent()
+            val sent = chats(0)
+            assertEquals(listOf("first [Bow]", "second [Bow]"), sent.map { it.content })
+            assertEquals(listOf(listOf(share), emptyList()), sent.map { it.itemShares })
+            assertEquals("Bob", sent.last().authorUsername)
+            assertEquals(1, game.warnings.count { it.code == "observation_rejected" })
+
+            transport.close(0, 1013, "temporary")
+            runCurrent()
+            advanceTimeBy((client.status() as BridgeStatus.Retrying).delayMillis)
+            runCurrent()
+            transport.sendWelcome(1)
+            runCurrent()
+            assertEquals(sent, chats(1))
+        } finally {
+            client.stop()
+            runCurrent()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `chat and item images outside Wynncraft are never queued for a later connection`() = runTest {
         val game = FakeGame()
         val transport = FakeTransport { game.identity }
