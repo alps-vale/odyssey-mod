@@ -103,8 +103,19 @@ internal object ItemSharing {
         private val decoder = model.javaClass.getMethod("decodeItemWithTrustedName", bufferClass, String::class.java)
         private val pattern = model.javaClass.getMethod("getEncodedDataPattern").invoke(model) as Pattern
         private val wynnItemClass = Class.forName("com.wynntils.models.items.WynnItem")
-        private val fakeStack = Class.forName("com.wynntils.models.items.FakeItemStack")
-            .getConstructor(wynnItemClass, String::class.java)
+        private val chatStack: (Any) -> ItemStack = run {
+            val type = Class.forName("com.wynntils.models.items.FakeItemStack")
+            try {
+                val legacy = type.getConstructor(wynnItemClass, String::class.java)
+                return@run { item -> legacy.newInstance(item, "From chat") as ItemStack }
+            } catch (_: NoSuchMethodException) {
+                // Newer Wynntils distinguishes encoded chat items from guide and inventory items.
+                val source = Class.forName("com.wynntils.handlers.tooltip.type.ItemSourceType")
+                val encoded = source.getField("ENCODED").get(null)
+                val constructor = type.getConstructor(wynnItemClass, source, String::class.java)
+                return@run { item -> constructor.newInstance(item, encoded, "From chat") as ItemStack }
+            }
+        }
         private val namedItem = Class.forName("com.wynntils.models.items.properties.NamedItemProperty")
         private val getName = namedItem.getMethod("getName")
         private val tierItem = Class.forName("com.wynntils.models.items.properties.GearTierItemProperty")
@@ -127,7 +138,7 @@ internal object ItemSharing {
                     if (!namedItem.isInstance(item)) return@runCatching null
                     val name = getName.invoke(item) as String
                     if (!isSafeRemoteText(name, MAX_ITEM_NAME_CODE_POINTS)) return@runCatching null
-                    val stack = fakeStack.newInstance(item, "From chat") as ItemStack
+                    val stack = chatStack(item)
                     val color = if (tierItem.isInstance(item)) {
                         val tier = getTier.invoke(item)
                         (getFormatting.invoke(tier) as net.minecraft.ChatFormatting).color
