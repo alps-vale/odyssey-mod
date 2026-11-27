@@ -19,10 +19,13 @@ native hover-item fixture, and exits. It needs a display. The PNG and log are in
 `build/item-smoke/`; your normal game instance is untouched.
 
 To exercise Wynntils decoding too, put its Minecraft 1.21.11 JAR in
-`build/item-smoke/mods/`. Put your cached Wynncraft resource pack in
-`build/item-smoke/resourcepacks/wynncraft.zip` for the server's fonts and textures.
-The test uses Wynntils' own encoder to create a Stratiformis fixture, then checks
-Odyssey's decoding and rendering path. These files are not bundled in releases.
+`build/item-smoke/mods/` and make sure Wynntils can load its gear registry.
+The fitted-tooltip pixel check needs the server's fonts and textures: put your
+cached pack at `build/item-smoke/resourcepacks/wynncraft.zip`. Without it the
+fitted PNG can fail the bounds check even when decoding works. The native-only
+smoke does not need the pack. The test uses Wynntils' own encoder to create a
+Stratiformis fixture, then checks Odyssey's decoding and rendering path. Neither
+the JAR nor the pack is bundled in releases.
 
 ## Repository configuration
 
